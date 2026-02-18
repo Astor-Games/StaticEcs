@@ -7,6 +7,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -58,6 +59,19 @@ namespace FFS.Libraries.StaticEcs {
 
             config ??= DefaultComponentConfig<T, WorldType>.Default;
             ModuleComponents.Value.RegisterComponentType(config);
+        }
+        
+        [MethodImpl(AggressiveInlining)]
+        public static List<IComponentsWrapper> GetComponentsPools() {
+
+            var componentPools = new List<IComponentsWrapper>();
+            var allPools = ModuleComponents.Value.GetAllRawsPools();
+            foreach (var pool in allPools)
+            {
+                if (pool is IComponentsWrapper componentsPool) 
+                    componentPools.Add(componentsPool);
+            }
+            return componentPools;
         }
 
         [MethodImpl(AggressiveInlining)]
