@@ -181,6 +181,7 @@ namespace FFS.Libraries.StaticEcs {
                         freePage.Mask = Mask;
                         freePage.UnreadReceiversCount = UnreadReceiversCount;
                         Data = null;
+                        Sources = null;
                         Mask = null;
                         UnreadReceiversCount = null;
                         Version++;
@@ -198,6 +199,7 @@ namespace FFS.Libraries.StaticEcs {
                     [MethodImpl(AggressiveInlining)]
                     public void InitNew() {
                         Data = new T[EVENTS_PER_PAGE];
+                        Sources = new Entity[EVENTS_PER_PAGE];
                         Mask = new ulong[MASKS_IN_PAGE];
                         UnreadReceiversCount = new ushort[EVENTS_PER_PAGE];
                     }
