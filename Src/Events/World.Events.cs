@@ -17,7 +17,7 @@ namespace FFS.Libraries.StaticEcs {
     
     public interface IEvents
     {
-        public void Send<E>(E value = default) where E : struct, IEvent;
+        public void Send<E>(E value = default, EntityGID source = default) where E : struct, IEvent;
 
         public bool TryGetPool(Type eventType, out IEventPoolWrapper pool);
     }
@@ -29,12 +29,12 @@ namespace FFS.Libraries.StaticEcs {
     public readonly struct EventsWrapper<WorldType> : IEvents where WorldType : struct, IWorldType {
         
         [MethodImpl(AggressiveInlining)]
-        public void Send<E>(E value = default, World<WorldType>.Entity source = default) where E : struct, IEvent {
+        public void Send<E>(E value = default, EntityGID source = default) where E : struct, IEvent {
             World<WorldType>.Events.Send(value, source);
         }
 
         [MethodImpl(AggressiveInlining)]
-        void IEvents.Send<E>(E value) => World<WorldType>.Events.Send(value);
+        void IEvents.Send<E>(E value, EntityGID source) => World<WorldType>.Events.Send(value, source);
 
         [MethodImpl(AggressiveInlining)]
         public bool TryGetPool(Type eventType, out IEventPoolWrapper pool) {
@@ -63,7 +63,7 @@ namespace FFS.Libraries.StaticEcs {
 
             #region PUBLIC
             [MethodImpl(AggressiveInlining)]
-            public static bool Send<E>(E value = default, Entity source = default) where E : struct, IEvent {
+            public static bool Send<E>(E value = default, EntityGID source = default) where E : struct, IEvent {
                 #if FFS_ECS_DEBUG
                 if (!IsWorldInitialized()) throw new StaticEcsException($"[ World<{typeof(WorldType)}>.Events.Send<{typeof(E)}> ] Ecs not initialized");
                 if (!Pool<E>.Value.initialized) throw new StaticEcsException($"[ World<{typeof(WorldType)}>.Events.Send<{typeof(E)}> ] Event type {typeof(E)} not registered");

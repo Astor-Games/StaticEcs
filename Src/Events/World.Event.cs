@@ -40,7 +40,7 @@ namespace FFS.Libraries.StaticEcs {
                 }
             }
             
-            public ref Entity Source {
+            public ref EntityGID Source {
                 [MethodImpl(AggressiveInlining)]
                 get {
                     #if FFS_ECS_DEBUG
