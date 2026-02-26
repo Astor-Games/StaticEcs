@@ -8,7 +8,8 @@
 using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -29,10 +30,10 @@ namespace FFS.Libraries.StaticEcs {
                 clusters = HandleClustersRange(clusters);
 
                 var tempChunks = TempChunksData.Create();
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 Entities.Value.Write(ref writer, strategy, clusters, ref tempChunks, false);
                 var result = writer.CopyToBytes(gzip);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
                 tempChunks.Dispose();
                 return result;
             }
@@ -45,10 +46,10 @@ namespace FFS.Libraries.StaticEcs {
                 clusters = HandleClustersRange(clusters);
                 
                 var tempChunks = TempChunksData.Create();
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 Entities.Value.Write(ref writer, strategy, clusters, ref tempChunks, false);
                 writer.CopyToBytes(ref result, gzip);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
                 tempChunks.Dispose();
             }
             
@@ -60,15 +61,15 @@ namespace FFS.Libraries.StaticEcs {
                 clusters = HandleClustersRange(clusters);
                 
                 var tempChunks = TempChunksData.Create();
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 Entities.Value.Write(ref writer, strategy, clusters, ref tempChunks, false);
                 writer.FlushToFile(filePath, gzip, flushToDisk);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
                 tempChunks.Dispose();
             }
             
             [MethodImpl(AggressiveInlining)]
-            public static void RestoreFromGIDStoreSnapshot(BinaryPackReader reader) {
+            public static void RestoreFromGIDStoreSnapshot(MemoryPackReader reader) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
@@ -81,13 +82,16 @@ namespace FFS.Libraries.StaticEcs {
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
                 if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
+                    var writer = MemoryWriterPool.Rent((uint) (snapshot.Length * 2));
                     writer.WriteGzipData(snapshot);
                     var reader = writer.AsReader();
                     Entities.Value.Read(ref reader, false);
-                    writer.Dispose();
+                    MemoryWriterPool.Return(writer);
                 } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
+                    
+                    var span = new ReadOnlySpan<byte>(snapshot);
+                    var optionalState = MemoryPackReaderOptionalStatePool.Rent(MemoryPackSerializerOptions.Default);
+                    var reader = new MemoryPackReader(span, optionalState);
                     Entities.Value.Read(ref reader, false);
                 }
             }
@@ -98,11 +102,11 @@ namespace FFS.Libraries.StaticEcs {
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
                 CalculateByteSizeHint(ref byteSizeHint);
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
+                var writer = MemoryWriterPool.Rent(byteSizeHint);
                 writer.WriteFromFile(worldSnapshotFilePath, gzip);
                 var reader = writer.AsReader();
                 Entities.Value.Read(ref reader, false);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             [MethodImpl(AggressiveInlining)]
@@ -118,7 +122,7 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void LoadEntitiesSnapshot(BinaryPackReader reader, bool entitiesAsNew = false, QueryFunctionWithEntity<WorldType> onLoad = null) {
+            public static void LoadEntitiesSnapshot(MemoryPackReader reader, bool entitiesAsNew = false, QueryFunctionWithEntity<WorldType> onLoad = null) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
@@ -127,9 +131,9 @@ namespace FFS.Libraries.StaticEcs {
 
                 BeforeRead(snapshotParams);
 
-                var entitiesCount = reader.ReadUint();
-                var componentGuidById = reader.ReadArrayUnmanagedPooled<Guid>(out var h1).Array;
-                var tagGuidById = reader.ReadArrayUnmanagedPooled<Guid>(out var h3).Array;
+                var entitiesCount = reader.ReadVarIntUInt32();
+                var componentGuidById = reader.ReadUnmanagedArrayPooled<Guid>(out var h1).Array;
+                var tagGuidById = reader.ReadUnmanagedArrayPooled<Guid>(out var h3).Array;
                 
                 var dynamicComponentsPoolMap = ArrayPool<IComponentsWrapper>.Shared.Rent(componentGuidById!.Length);
                 for (var i = 0; i < componentGuidById.Length; i++) {
@@ -176,18 +180,18 @@ namespace FFS.Libraries.StaticEcs {
                 h3.Return();
 
                 ReadSnapshotData(ref reader, snapshotParams);
-                var count = reader.ReadInt();
+                var count = reader.ReadVarIntInt32();
 
                 for (var i = 0; i < count; i++) {
                     var key = reader.ReadGuid();
-                    var version = reader.ReadUshort();
-                    var byteSize = reader.ReadUint();
+                    var version = reader.ReadVarIntUInt16();
+                    var byteSize = reader.ReadVarIntInt32();
                     if (SnapshotDataEntitySerializers.TryGetValue(key, out var val)) {
                         for (var j = 0; j < entitiesCount; j++) {
                             val.reader(ref reader, entities[j], version, snapshotParams);
                         }
                     } else {
-                        reader.SkipNext(byteSize);
+                        reader.Advance(byteSize);
                     }
                 }
 
@@ -219,12 +223,15 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 if (gzip) {
                     CalculateByteSizeHint(ref gzipByteSizeHint);
-                    var writer = BinaryPackWriter.CreateFromPool(gzipByteSizeHint);
+                    var writer = MemoryWriterPool.Rent(gzipByteSizeHint);
                     writer.WriteGzipData(data);
                     LoadEntitiesSnapshot(writer.AsReader(), entitiesAsNew, onLoad);
-                    writer.Dispose();
+                    MemoryWriterPool.Return(writer);
                 } else {
-                    var reader = new BinaryPackReader(data, (uint) data.Length, 0);
+                    
+                    var span = new ReadOnlySpan<byte>(data);
+                    var optionalState = MemoryPackReaderOptionalStatePool.Rent(MemoryPackSerializerOptions.Default);
+                    var reader = new MemoryPackReader(span, optionalState);
                     LoadEntitiesSnapshot(reader, entitiesAsNew);
                 }
             }
@@ -235,11 +242,11 @@ namespace FFS.Libraries.StaticEcs {
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
                 CalculateByteSizeHint(ref byteSizeHint);
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
+                var writer = MemoryWriterPool.Rent(byteSizeHint);
                 writer.WriteFromFile(filePath, gzip);
                 var reader = writer.AsReader();
                 LoadEntitiesSnapshot(reader, entitiesAsNew, onLoad);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             #if ENABLE_IL2CPP
@@ -247,7 +254,7 @@ namespace FFS.Libraries.StaticEcs {
             [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
             #endif
             public struct EntitiesWriter : IDisposable {
-                internal BinaryPackWriter Writer;
+                internal MemoryPackWriter Writer;
                 internal Entity[] EntityIds;
                 internal uint EntitiesCount;
                 internal uint StartWriterPosition;
@@ -259,11 +266,11 @@ namespace FFS.Libraries.StaticEcs {
                 public EntitiesWriter(uint byteSizeHint) {
                     EntitiesCount = 0;
                     EntityIds = ArrayPool<Entity>.Shared.Rent(Entities.Value.chunks.Length << Const.ENTITIES_IN_CHUNK_SHIFT);
-                    Writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                    Writer.Skip(sizeof(uint));
+                    Writer = MemoryWriterPool.Rent(byteSizeHint);
+                    Writer.Advance(sizeof(uint));
                     ModuleComponents.Value.WriteGuids(ref Writer);
                     ModuleTags.Value.WriteGuids(ref Writer);
-                    StartWriterPosition = Writer.Position;
+                    StartWriterPosition = Writer.WrittenCount;
                     
                     BeforeWrite(new SnapshotWriteParams(SnapshotType.Entities));
                     
@@ -278,7 +285,7 @@ namespace FFS.Libraries.StaticEcs {
                     Assert("EntitiesWriter", !Destroyed, "EntitiesWriter is destroyed");
                     #endif
   
-                    Writer.WriteUlong(entity.Gid().Raw);
+                    Writer.WriteVarInt(entity.Gid().Raw);
                     Writer.WriteBool(entity.IsDisabled());
                     ModuleComponents.Serializer.Value.WriteEntity(ref Writer, entity);
                     ModuleTags.Serializer.Value.WriteEntity(ref Writer, entity);
@@ -291,7 +298,7 @@ namespace FFS.Libraries.StaticEcs {
                     Assert("EntitiesWriter", !Destroyed, "EntitiesWriter is destroyed");
                     #endif
   
-                    Writer.WriteUlong(entity.Gid().Raw);
+                    Writer.WriteVarInt(entity.Gid().Raw);
                     Writer.WriteBool(entity.IsDisabled());
                     ModuleComponents.Serializer.Value.WriteEntityAndDestroy(ref Writer, entity);
                     ModuleTags.Serializer.Value.WriteEntityAndDestroy(ref Writer, entity);
@@ -323,10 +330,10 @@ namespace FFS.Libraries.StaticEcs {
                     Assert("EntitiesWriter", !Destroyed, "EntitiesWriter is destroyed");
                     Destroyed = true;
                     #endif
-                    Writer.WriteUintAt(0, EntitiesCount);
+                    Writer.WriteVarInt(EntitiesCount);
                     CreateCustomSnapshot(withCustomSnapshotData);
                     var result = Writer.CopyToBytes(gzip);
-                    Writer.Position = StartWriterPosition;
+                    Writer.WrittenCount = StartWriterPosition;
                     EntitiesCount = 0;
                     return result;
                 }
@@ -337,10 +344,10 @@ namespace FFS.Libraries.StaticEcs {
                     Assert("EntitiesWriter", !Destroyed, "EntitiesWriter is destroyed");
                     Destroyed = true;
                     #endif
-                    Writer.WriteUintAt(0, EntitiesCount);
+                    Writer.WriteVarInt(EntitiesCount);
                     CreateCustomSnapshot(withCustomSnapshotData);
                     Writer.CopyToBytes(ref result, gzip);
-                    Writer.Position = StartWriterPosition;
+                    Writer.WrittenCount = StartWriterPosition;
                     EntitiesCount = 0;
                 }
 
@@ -350,10 +357,10 @@ namespace FFS.Libraries.StaticEcs {
                     Assert("EntitiesWriter", !Destroyed, "EntitiesWriter is destroyed");
                     Destroyed = true;
                     #endif
-                    Writer.WriteUintAt(0, EntitiesCount);
+                    Writer.WriteVarInt(EntitiesCount);
                     CreateCustomSnapshot(withCustomSnapshotData);
                     Writer.FlushToFile(filePath, gzip, flushToDisk);
-                    Writer.Position = StartWriterPosition;
+                    Writer.WrittenCount = StartWriterPosition;
                     EntitiesCount = 0;
                 }
 
@@ -363,20 +370,25 @@ namespace FFS.Libraries.StaticEcs {
                     
                     if (withCustomSnapshotData) {
                         WriteSnapshotData(ref Writer, snapshotParams);
-                        Writer.WriteInt(SnapshotDataEntitySerializers.Count);
-                        foreach (var (key, (writer, _, version)) in SnapshotDataEntitySerializers) {
+                        Writer.WriteVarInt(SnapshotDataEntitySerializers.Count);
+                        
+                        foreach (var (key, (writer, _, version)) in SnapshotDataEntitySerializers) 
+                        {
                             Writer.WriteGuid(key);
-                            Writer.WriteUshort(version);
-                            var point = Writer.MakePoint(sizeof(uint));
-                            for (var i = 0; i < EntitiesCount; i++) {
-                                writer(ref Writer, EntityIds[i], snapshotParams);
+                            Writer.WriteVarInt(version);
+                            
+                            using(Writer.TrackWritten())
+                            {
+                                for (var i = 0; i < EntitiesCount; i++)
+                                {
+                                    writer(ref Writer, EntityIds[i], snapshotParams);
+                                }
                             }
-
-                            Writer.WriteUintAt(point, Writer.Position - (point + sizeof(uint)));
                         }
+                        
                     } else {
-                        Writer.WriteInt(0);
-                        Writer.WriteInt(0);
+                        Writer.WriteVarInt(0);
+                        Writer.WriteVarInt(0);
                     }
 
                     for (var i = 0; i < PostCreateSnapshotCallbacks.Count; i++) {
@@ -394,7 +406,7 @@ namespace FFS.Libraries.StaticEcs {
 
                 [MethodImpl(AggressiveInlining)]
                 public void Dispose() {
-                    Writer.Dispose();
+                    MemoryWriterPool.Return(Writer);
                     if (EntityIds != null) {
                         ArrayPool<Entity>.Shared.Return(EntityIds);
                     }

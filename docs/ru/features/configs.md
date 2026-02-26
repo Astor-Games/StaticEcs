@@ -55,17 +55,17 @@ public struct Scale : IComponent {
 
         // писатель компонента для сериализации (подробнее в разделе `Сериализации`)
         public BinaryWriter<Scale> Writer() {
-            return (ref BinaryPackWriter writer, in Scale value) => { };
+            return (ref MemoryPackWriter writer, in Scale value) => { };
         }
 
         // читатель компонента для сериализации (подробнее в разделе `Сериализации`)
         public BinaryReader<Scale> Reader() {
-            return (ref BinaryPackReader reader) => { };
+            return (ref MemoryPackReader reader) => { };
         }
 
         // миграция компонента при изменении для сериализации (подробнее в разделе `Сериализации`)
         public EcsComponentMigrationReader<Scale, WorldType> MigrationReader() {
-            return (ref BinaryPackReader reader, World<WorldType>.Entity entity, byte version, bool disabled) => { };
+            return (ref MemoryPackReader reader, World<WorldType>.Entity entity, byte version, bool disabled) => { };
         }
 
         // стратегия чтения\записи компонента при создании снимка мира для сериализации (подробнее в разделе `Сериализации`)

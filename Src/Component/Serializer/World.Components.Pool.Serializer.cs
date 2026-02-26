@@ -9,18 +9,19 @@ using System;
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
 #endif
 
 namespace FFS.Libraries.StaticEcs {
-    public delegate T EcsComponentMigrationReader<T, WorldType>(ref BinaryPackReader reader, World<WorldType>.Entity entity, byte version, bool disabled)
+    public delegate T EcsComponentMigrationReader<T, WorldType>(ref MemoryPackReader reader, World<WorldType>.Entity entity, byte version, bool disabled)
         where T : struct
         where WorldType : struct, IWorldType;
     
-    public delegate void EcsComponentDeleteMigrationReader<WorldType>(ref BinaryPackReader reader, World<WorldType>.Entity entity, byte version, bool disabled)
+    public delegate void EcsComponentDeleteMigrationReader<WorldType>(ref MemoryPackReader reader, World<WorldType>.Entity entity, byte version, bool disabled)
         where WorldType : struct, IWorldType;
 
     #if ENABLE_IL2CPP
@@ -53,7 +54,7 @@ namespace FFS.Libraries.StaticEcs {
                     if (guid != System.Guid.Empty) {
                         _readWriteArrayStrategy = config.ReadWriteStrategy();
                         _migrationReader = config.MigrationReader();
-                        BinaryPack.RegisterWithCollections(config.Writer(), config.Reader(), _readWriteArrayStrategy);
+                        MemoryPackFormatterProvider.RegisterWithCollections(config.Writer(), config.Reader(), _readWriteArrayStrategy);
                     }
                 }
 
@@ -67,18 +68,18 @@ namespace FFS.Libraries.StaticEcs {
 
                 [MethodImpl(AggressiveInlining)]
                 [SuppressMessage("ReSharper", "PossibleNullReferenceException")]
-                internal void WriteChunk(ref BinaryPackWriter writer, ref Components<T> pool, uint chunkIdx) {
+                internal void WriteChunk(ref MemoryPackWriter writer, ref Components<T> pool, uint chunkIdx) {
                     ref var chunk = ref pool.chunks[chunkIdx];
                     
                     writer.WriteBool(pool._clearable);
-                    writer.WriteUlong(chunk.notEmptyBlocks);
+                    writer.WriteVarInt(chunk.notEmptyBlocks);
                     if (chunk.notEmptyBlocks != 0) {
                         var entities = chunk.entities;
                         
-                        writer.WriteByte(version);
-                        writer.WriteUlong(chunk.fullBlocks);
-                        writer.WriteArrayUnmanaged(entities);
-                        writer.WriteArrayUnmanaged(chunk.disabledEntities);
+                        writer.WriteVarInt(version);
+                        writer.WriteVarInt(chunk.fullBlocks);
+                        writer.WriteUnmanagedArray(entities);
+                        writer.WriteUnmanagedArray(chunk.disabledEntities);
 
                         var unmanagedStrategy = _readWriteArrayStrategy.IsUnmanaged();
                         writer.WriteBool(unmanagedStrategy);
@@ -109,8 +110,8 @@ namespace FFS.Libraries.StaticEcs {
                                     
                                     var end = Utils.Msb(mask) + Const.ENTITIES_IN_BLOCK * curBlockIdx + 1;
                                     var count = end - start;
-                                    writer.WriteInt(start);
-                                    writer.WriteInt(count);
+                                    writer.WriteVarInt(start);
+                                    writer.WriteVarInt(count);
                                     _readWriteArrayStrategy.WriteArray(ref writer, components, start, count);
                                 }
 
@@ -156,12 +157,12 @@ namespace FFS.Libraries.StaticEcs {
                                     if (total >= (end - idx) >> 1) {
                                         for (; idx < end; idx++) {
                                             if ((entitiesMask & (1UL << idx)) > 0) {
-                                                writer.Write(in data[idx + dOffset]);
+                                                writer.WriteSpan<T>(data[idx + dOffset]);
                                             }
                                         }
                                     } else {
                                         do {
-                                            writer.Write(in data[idx + dOffset]);
+                                            writer.WriteValue(in data[idx + dOffset]);
                                             entitiesMask &= entitiesMask - 1UL;
                                             idx = deBruijn[(int) (((entitiesMask & (ulong) -(long) entitiesMask) * 0x37E84A99DAE458FUL) >> 58)];
                                         } while (entitiesMask > 0);
@@ -174,19 +175,19 @@ namespace FFS.Libraries.StaticEcs {
 
                 [MethodImpl(AggressiveInlining)]
                 [SuppressMessage("ReSharper", "PossibleNullReferenceException")]
-                internal void ReadChunk(ref BinaryPackReader reader, ref Components<T> pool, uint chunkIdx) {
+                internal void ReadChunk(ref MemoryPackReader reader, ref Components<T> pool, uint chunkIdx) {
                     ref var chunk = ref pool.chunks[chunkIdx];
 
                     var clearable = reader.ReadBool(); // TODO  
-                    chunk.notEmptyBlocks = reader.ReadUlong();
+                    chunk.notEmptyBlocks = reader.ReadVarIntUInt64();
 
                     if (chunk.notEmptyBlocks != 0) {
                         pool.InitChunkSimple(ref chunk, chunkIdx);
                         
-                        var oldVersion = reader.ReadByte();
-                        chunk.fullBlocks = reader.ReadUlong();
-                        reader.ReadArrayUnmanaged(ref chunk.entities);
-                        reader.ReadArrayUnmanaged(ref chunk.disabledEntities);
+                        var oldVersion = reader.ReadVarIntByte();
+                        chunk.fullBlocks = reader.ReadVarIntUInt64();
+                        reader.ReadUnmanagedArray(ref chunk.entities);
+                        reader.ReadUnmanagedArray(ref chunk.disabledEntities);
 
                         var unmanaged = reader.ReadBool(); // TODO validate strategy
 
@@ -200,15 +201,15 @@ namespace FFS.Libraries.StaticEcs {
                                 var notEmpty = !reader.ReadNullFlag();
                                 if (notEmpty) {
                                     pool.InitializeData(ref components);
-                                    var start = reader.ReadInt();
-                                    var count = reader.ReadInt();
+                                    var start = reader.ReadVarIntInt32();
+                                    var count = reader.ReadVarIntInt32();
                                     
                                     if (version == oldVersion) {
                                         _readWriteArrayStrategy.ReadArray(ref reader, ref components, start);
                                     } else {
                                         _ = reader.ReadNullFlag();
-                                        _ = reader.ReadInt(); // count
-                                        var byteSize = reader.ReadUint();
+                                        _ = reader.ReadVarIntInt32(); // count
+                                        var byteSize = reader.ReadVarIntUInt32();
                                         var oneSize = byteSize / count;
                                         var dataEntity = (uint) (dataIdx * Const.DATA_BLOCK_SIZE);
                                         var entity = new Entity();
@@ -221,7 +222,7 @@ namespace FFS.Libraries.StaticEcs {
                                                 eid += Const.ENTITY_ID_OFFSET;
                                                 components[i] = _migrationReader(ref reader, entity, oldVersion, (chunk.disabledEntities[blockIdx] & (1UL << blockEntityIdx)) != 0);
                                             } else {
-                                                reader.SkipNext((uint) oneSize);
+                                                reader.Advance((uint) oneSize);
                                             }
                                         }
                                     }
@@ -272,12 +273,12 @@ namespace FFS.Libraries.StaticEcs {
                                         if (total >= (end - idx) >> 1) {
                                             for (; idx < end; idx++) {
                                                 if ((entitiesMask & (1UL << idx)) > 0) {
-                                                    data[idx + dOffset] = reader.Read<T>();
+                                                    data[idx + dOffset] = reader.ReadValue<T>();
                                                 }
                                             }
                                         } else {
                                             do {
-                                                data[idx + dOffset] = reader.Read<T>();
+                                                data[idx + dOffset] = reader.ReadValue<T>();
                                                 entitiesMask &= entitiesMask - 1UL;
                                                 idx = deBruijn[(int) (((entitiesMask & (ulong) -(long) entitiesMask) * 0x37E84A99DAE458FUL) >> 58)];
                                             } while (entitiesMask > 0);
@@ -307,11 +308,11 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void Write(ref BinaryPackWriter writer, ref Components<T> pool, Entity entity) {
-                    var offset = writer.MakePoint(sizeof(ushort));
-                    writer.WriteByte(version);
-                    writer.Write(in pool.RefInternal(entity));
-                    var size = writer.Position - (offset + sizeof(short));
+                internal void Write(ref MemoryPackWriter writer, ref Components<T> pool, Entity entity) {
+                    var offset = writer.Reserve(sizeof(ushort));
+                    writer.WriteVarInt(version);
+                    writer.WriteValue(in pool.RefInternal(entity));
+                    var size = writer.WrittenCount - (offset + sizeof(short));
                     #if FFS_ECS_DEBUG
                     if (size > short.MaxValue) throw new StaticEcsException($"Size of component {typeof(T)} more than {short.MaxValue} bytes");
                     #endif
@@ -324,12 +325,12 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void Read(ref BinaryPackReader reader, ref Components<T> pool, Entity entity) {
-                    var disabled = (reader.ReadUshort() & ComponentSerializerUtils.disabledBit) == ComponentSerializerUtils.disabledBit;
-                    var oldVersion = reader.ReadByte();
+                internal void Read(ref MemoryPackReader reader, ref Components<T> pool, Entity entity) {
+                    var disabled = (reader.ReadVarIntUInt16() & ComponentSerializerUtils.disabledBit) == ComponentSerializerUtils.disabledBit;
+                    var oldVersion = reader.ReadVarIntByte();
 
                     pool.AddInternal(entity, version == oldVersion 
-                                         ? reader.Read<T>() 
+                                         ? reader.ReadValue<T>() 
                                          : _migrationReader(ref reader, entity, oldVersion, disabled));
 
                     if (disabled) {
@@ -345,34 +346,34 @@ namespace FFS.Libraries.StaticEcs {
         internal const int disabledBitInv = ~disabledBit;
         
         [MethodImpl(AggressiveInlining)]
-        internal static void SkipOneComponent(this ref BinaryPackReader reader) {
-            var size = reader.ReadUshort() & disabledBitInv;
-            reader.SkipNext((uint) size);
+        internal static void SkipOneComponent(this ref MemoryPackReader reader) {
+            var size = reader.ReadVarIntUInt16() & disabledBitInv;
+            reader.Advance((uint) size);
         }
         
         [MethodImpl(AggressiveInlining)]
-        internal static void DeleteOneComponentMigration<WorldType>(this ref BinaryPackReader reader, World<WorldType>.Entity entity, EcsComponentDeleteMigrationReader<WorldType> migration) 
+        internal static void DeleteOneComponentMigration<WorldType>(this ref MemoryPackReader reader, World<WorldType>.Entity entity, EcsComponentDeleteMigrationReader<WorldType> migration) 
             where WorldType : struct, IWorldType {
-            var disabled = (reader.ReadUshort() & disabledBit) == disabledBit;
-            var oldVersion = reader.ReadByte();
+            var disabled = (reader.ReadVarIntUInt16() & disabledBit) == disabledBit;
+            var oldVersion = reader.ReadVarIntByte();
                     
             migration(ref reader, entity, oldVersion, disabled);
         }
         
         [MethodImpl(AggressiveInlining)]
-        internal static void DeleteAllComponentMigration<WorldType>(this ref BinaryPackReader reader, EcsComponentDeleteMigrationReader<WorldType> migration, uint chunkIdx) 
+        internal static void DeleteAllComponentMigration<WorldType>(this ref MemoryPackReader reader, EcsComponentDeleteMigrationReader<WorldType> migration, uint chunkIdx) 
             where WorldType : struct, IWorldType {
             var clearable = reader.ReadBool();
-            var notEmptyBlocks = reader.ReadUlong();
+            var notEmptyBlocks = reader.ReadVarIntUInt64();
 
             if (notEmptyBlocks != 0) {
                 var entities = ArrayPool<ulong>.Shared.Rent(Const.BLOCK_IN_CHUNK);
                 var disabledEntities = ArrayPool<ulong>.Shared.Rent(Const.BLOCK_IN_CHUNK);
 
-                var oldVersion = reader.ReadByte();
-                var fullBlocks = reader.ReadUlong();
-                reader.ReadArrayUnmanaged(ref entities);
-                reader.ReadArrayUnmanaged(ref disabledEntities);
+                var oldVersion = reader.ReadVarIntByte();
+                var fullBlocks = reader.ReadVarIntUInt64();
+                reader.ReadUnmanagedArray(ref entities);
+                reader.ReadUnmanagedArray(ref disabledEntities);
 
                 var unmanaged = reader.ReadBool();
 
@@ -383,13 +384,13 @@ namespace FFS.Libraries.StaticEcs {
                     for (var dataIdx = dataIdxStart; dataIdx < dataIdxEnd; dataIdx++) {
                         var notEmpty = !reader.ReadNullFlag();
                         if (notEmpty) {
-                            var start = reader.ReadInt();
-                            var count = reader.ReadInt();
+                            var start = reader.ReadVarIntInt32();
+                            var count = reader.ReadVarIntInt32();
 
                             _ = reader.ReadNullFlag();
-                            _ = reader.ReadInt(); // count
-                            var byteSize = reader.ReadUint();
-                            var oneSize = byteSize / count;
+                            _ = reader.ReadVarIntInt32(); // count
+                            var byteSize = reader.ReadVarIntUInt32();
+                            var oneSize = (int)byteSize / count;
                             var dataEntity = (uint) (dataIdx * Const.DATA_BLOCK_SIZE);
                             var entity = new World<WorldType>.Entity();
                             ref var eid = ref entity.id;
@@ -402,7 +403,7 @@ namespace FFS.Libraries.StaticEcs {
                                     eid += Const.ENTITY_ID_OFFSET;
                                     migration(ref reader, entity, oldVersion, disabled);
                                 } else {
-                                    reader.SkipNext((uint) oneSize);
+                                    reader.Advance(oneSize);
                                 }
                             }
                         }

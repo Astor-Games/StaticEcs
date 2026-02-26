@@ -6,7 +6,8 @@
 #endif
 
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -122,13 +123,13 @@ namespace FFS.Libraries.StaticEcs {
     public static class MultiComponentExtensions {
         
         [MethodImpl(AggressiveInlining)]
-        public static Multi<T> ReadMulti<WorldType, T>(this ref BinaryPackReader reader) where T : struct where WorldType : struct, IWorldType {
+        public static Multi<T> ReadMulti<WorldType, T>(this ref MemoryPackReader reader) where T : struct where WorldType : struct, IWorldType {
             var value = new Multi<T>();
-            var count = reader.ReadUshort();
+            var count = reader.ReadVarIntUInt16();
             if (count > 0) {
                 World<WorldType>.Context<MultiComponents<T>>.Get().AddWithCapacity(ref value, count);
                 for (var i = 0; i < count; i++) {
-                    value.Add(reader.Read<T>());
+                    value.Add(reader.ReadValue<T>());
                 }
             } else {
                 World<WorldType>.Context<MultiComponents<T>>.Get().AddDefault(ref value);
@@ -138,25 +139,25 @@ namespace FFS.Libraries.StaticEcs {
         }
         
         [MethodImpl(AggressiveInlining)]
-        public static void WriteMulti<T>(this ref BinaryPackWriter writer, in Multi<T> value) where T : struct {
+        public static void WriteMulti<T>(this ref MemoryPackWriter writer, in Multi<T> value) where T : struct {
             var count = value.count;
-            writer.WriteUshort(count);
+            writer.WriteVarInt(count);
             if (count > 0) {
                 var values = value.data.values[value.blockIdx];
                 var offset = value.dataOffset;
                 for (var i = 0; i < count; i++) {
-                    writer.Write(in values[i + offset]);
+                    writer.WriteValue(in values[i + offset]);
                 }
             }
         }
         
         [MethodImpl(AggressiveInlining)]
-        public static Multi<T> ReadMultiUnmanaged<WorldType, T>(this ref BinaryPackReader reader) where T : unmanaged where WorldType : struct, IWorldType {
+        public static Multi<T> ReadMultiUnmanaged<WorldType, T>(this ref MemoryPackReader reader) where T : unmanaged where WorldType : struct, IWorldType {
             var value = new Multi<T>();
-            var count = reader.ReadUshort();
+            var count = reader.ReadVarIntUInt16();
             if (count > 0) {
                 World<WorldType>.Context<MultiComponents<T>>.Get().AddWithCapacity(ref value, count);
-                reader.ReadArrayUnmanaged(ref value.data.values[value.blockIdx]);
+                reader.ReadUnmanagedArray(ref value.data.values[value.blockIdx]);
             } else {
                 World<WorldType>.Context<MultiComponents<T>>.Get().AddDefault(ref value);
             }
@@ -165,35 +166,35 @@ namespace FFS.Libraries.StaticEcs {
         }
         
         [MethodImpl(AggressiveInlining)]
-        public static void WriteMultiUnmanaged<T>(this ref BinaryPackWriter writer, in Multi<T> value) where T : unmanaged {
+        public static void WriteMultiUnmanaged<T>(this ref MemoryPackWriter writer, in Multi<T> value) where T : unmanaged {
             var count = value.count;
-            writer.WriteUshort(count);
+            writer.WriteVarInt(count);
             if (count > 0) {
-                writer.WriteArrayUnmanaged(value.data.values[value.blockIdx], value.dataOffset, count);
+                writer.WriteUnmanagedArray(value.data.values[value.blockIdx], value.dataOffset, count);
             }
         }
         
         [MethodImpl(AggressiveInlining)]
-        public static ROMulti<T> ReadROMulti<WorldType, T>(this ref BinaryPackReader reader) where T : struct where WorldType : struct, IWorldType {
+        public static ROMulti<T> ReadROMulti<WorldType, T>(this ref MemoryPackReader reader) where T : struct where WorldType : struct, IWorldType {
             return new ROMulti<T> {
                 multi = reader.ReadMulti<WorldType, T>(),
             };
         }
         
         [MethodImpl(AggressiveInlining)]
-        public static void WriteROMulti<T>(this ref BinaryPackWriter writer, in ROMulti<T> value) where T : struct {
+        public static void WriteROMulti<T>(this ref MemoryPackWriter writer, in ROMulti<T> value) where T : struct {
             writer.WriteMulti(in value.multi);
         }
         
         [MethodImpl(AggressiveInlining)]
-        public static ROMulti<T> ReadROMultiUnmanaged<WorldType, T>(this ref BinaryPackReader reader) where T : unmanaged where WorldType : struct, IWorldType {
+        public static ROMulti<T> ReadROMultiUnmanaged<WorldType, T>(this ref MemoryPackReader reader) where T : unmanaged where WorldType : struct, IWorldType {
             return new ROMulti<T> {
                 multi = reader.ReadMultiUnmanaged<WorldType, T>(),
             };
         }
         
         [MethodImpl(AggressiveInlining)]
-        public static void WriteROMultiUnmanaged<T>(this ref BinaryPackWriter writer, in ROMulti<T> value) where T : unmanaged {
+        public static void WriteROMultiUnmanaged<T>(this ref MemoryPackWriter writer, in ROMulti<T> value) where T : unmanaged {
             writer.WriteMultiUnmanaged(in value.multi);
         }
     }

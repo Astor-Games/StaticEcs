@@ -9,7 +9,8 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -40,10 +41,14 @@ namespace FFS.Libraries.StaticEcs {
         internal partial struct ModuleComponents {
             
             [MethodImpl(AggressiveInlining)]
-            internal void WriteGuids(ref BinaryPackWriter writer) {
-                writer.WriteCollection(0, poolsCount, (ref BinaryPackWriter w, int i) => {
-                    w.WriteGuid(Value._pools[i].Guid());
-                });
+            internal void WriteGuids(ref MemoryPackWriter writer) {
+
+                Span<Guid> numbers = stackalloc Guid[poolsCount];
+                for (var i = 0; i < poolsCount; i++)
+                {
+                    numbers[i] = Value._pools[i].Guid();
+                }
+                writer.WriteUnmanagedSpan(numbers);
             }
             
             internal struct Serializer {
@@ -51,14 +56,14 @@ namespace FFS.Libraries.StaticEcs {
 
                 private Dictionary<Guid, IComponentsWrapper> _poolByGuid;
                 private Dictionary<Guid, EcsComponentDeleteMigrationReader<WorldType>> _deleteMigratorByGuid;
-                private List<(Guid id, uint offset)> _tempDeletedPoolIds;
+                private List<(Guid id, int offset)> _tempDeletedPoolIds;
                 private List<(Guid guid, ushort id)> _tempLoadedPools;
 
                 [MethodImpl(AggressiveInlining)]
                 internal void Create() {
                     _poolByGuid = new Dictionary<Guid, IComponentsWrapper>();
                     _deleteMigratorByGuid = new Dictionary<Guid, EcsComponentDeleteMigrationReader<WorldType>>();
-                    _tempDeletedPoolIds = new List<(Guid id, uint offset)>();
+                    _tempDeletedPoolIds = new List<(Guid id, int offset)>();
                     _tempLoadedPools = new List<(Guid guid, ushort id)>();
                 }
 
@@ -90,20 +95,20 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void WriteWorld(ref BinaryPackWriter writer, TempChunksData tempChunks) {
+                internal void WriteWorld(ref MemoryPackWriter writer, TempChunksData tempChunks) {
                     ref var components = ref ModuleComponents.Value;
-                    writer.WriteUshort(components.poolsCount);
-                    writer.WriteUshort(components.bitMask.maskLen);
-                    writer.WriteUint(tempChunks.ChunksCount);
+                    writer.WriteVarInt(components.poolsCount);
+                    writer.WriteVarInt(components.bitMask.maskLen);
+                    writer.WriteVarInt(tempChunks.ChunksCount);
                     for (var i = 0; i < tempChunks.ChunksCount; i++) {
                         var chunkIdx = tempChunks.Chunks[i];
-                        writer.WriteUint(chunkIdx);
+                        writer.WriteVarInt(chunkIdx);
                         WriteChunk(ref writer, chunkIdx);
                     }
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void WriteChunk(ref BinaryPackWriter writer, uint chunkIdx) {
+                internal void WriteChunk(ref MemoryPackWriter writer, uint chunkIdx) {
                     ref var components = ref ModuleComponents.Value;
                     
                     var hasEntities = HasEntitiesInChunk(chunkIdx);
@@ -124,37 +129,38 @@ namespace FFS.Libraries.StaticEcs {
                         #endif
                                 
                         writer.WriteGuid(guid);
-                        writer.WriteUshort(pool.DynamicId());
+                        writer.WriteVarInt(pool.DynamicId());
                             
                         if (hasEntities) {
-                            var sizePosition = writer.MakePoint(sizeof(uint));
-                            _poolByGuid[guid].WriteChunk(ref writer, chunkIdx);
-                            writer.WriteUintAt(sizePosition, writer.Position - (sizePosition + sizeof(uint)));
+                            using(writer.TrackWritten())
+                            {
+                                _poolByGuid[guid].WriteChunk(ref writer, chunkIdx);
+                            }
                         }
                     }
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void ReadWorld(ref BinaryPackReader reader) {
+                internal void ReadWorld(ref MemoryPackReader reader) {
                     ref var components = ref ModuleComponents.Value;
                     
-                    var poolsCount = reader.ReadUshort();
-                    var maskLen = reader.ReadUshort();
-                    var chunksCount = reader.ReadUint();
+                    var poolsCount = reader.ReadVarIntUInt16();
+                    var maskLen = reader.ReadVarIntUInt16();
+                    var chunksCount = reader.ReadVarIntUInt32();
                     
                     if (maskLen > components.bitMask.maskLen) {
                         throw new StaticEcsException($"In the saved data, the mask is {maskLen * 64} components in size, and in the current world {components.bitMask.maskLen * 64}, register at least {maskLen * 64 - 63} components in the world.");
                     }
                     
                     for (var i = 0; i < chunksCount; i++) {
-                        var chunkIdx = reader.ReadUint();
+                        var chunkIdx = reader.ReadVarIntUInt32();
                         
                         ReadChunk(ref reader, chunkIdx, poolsCount);
                     }
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void ReadChunk(ref BinaryPackReader reader, uint chunkIdx, uint poolsCount) {
+                internal void ReadChunk(ref MemoryPackReader reader, uint chunkIdx, uint poolsCount) {
                     ref var components = ref ModuleComponents.Value;
 
                     _tempDeletedPoolIds.Clear();
@@ -169,17 +175,17 @@ namespace FFS.Libraries.StaticEcs {
 
                     for (var j = 0; j < poolsCount; j++) {
                         var guid = reader.ReadGuid();
-                        var id = reader.ReadUshort();
+                        var id = reader.ReadVarIntUInt16();
 
                         if (hasEntities) {
-                            var byteSize = reader.ReadUint();
+                            var byteSize = reader.ReadVarIntInt32();
                             if (_poolByGuid.TryGetValue(guid, out var pool)) {
                                 pool.ReadChunk(ref reader, chunkIdx);
                                 _tempLoadedPools.Add((guid, id));
                             } else {
-                                _tempDeletedPoolIds.Add((guid, reader.Position));
+                                _tempDeletedPoolIds.Add((guid, reader.Consumed));
                                 components.bitMask.DelInChunk(chunkIdx, id);
-                                reader.SkipNext(byteSize);
+                                reader.Advance(byteSize);
                             }
                         }
                     }
@@ -201,68 +207,72 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void WriteEntity(ref BinaryPackWriter writer, Entity entity) {
+                internal void WriteEntity(ref MemoryPackWriter writer, Entity entity) {
                     ref var components = ref ModuleComponents.Value;
                     ref var bitMask = ref components.bitMask;
                     
-                    ushort len = 0;
-                    var point = writer.MakePoint(sizeof(ushort));
-                    
-                    var maskLen = bitMask.MaskLen;
-                    var eid = entity.id - Const.ENTITY_ID_OFFSET;
-                    var masks = bitMask.Chunk(eid);
-                    var start = (eid & Const.ENTITIES_IN_CHUNK_OFFSET_MASK) * maskLen;
-                    for (ushort i = 0; i < maskLen; i++) {
-                        var mask = masks[start + i];
-                        var offset = i << Const.LONG_SHIFT;
-                        while (mask > 0) {
-                            var id = Utils.PopLsb(ref mask) + offset;
-                            var pool = components._pools[id];
-                            if (!pool.Guid().Equals(Guid.Empty)) {
-                                writer.WriteUshort((ushort) id);
-                                pool.Write(ref writer, entity);
-                                len++;
+                    using (var count = writer.TrackCountShort())
+                    {
+                        var maskLen = bitMask.MaskLen;
+                        var eid = entity.id - Const.ENTITY_ID_OFFSET;
+                        var masks = bitMask.Chunk(eid);
+                        var start = (eid & Const.ENTITIES_IN_CHUNK_OFFSET_MASK) * maskLen;
+                        for (ushort i = 0; i < maskLen; i++) 
+                        {
+                            var mask = masks[start + i];
+                            var offset = i << Const.LONG_SHIFT;
+                            while (mask > 0) 
+                            {
+                                var id = Utils.PopLsb(ref mask) + offset;
+                                var pool = components._pools[id];
+                                if (!pool.Guid().Equals(Guid.Empty)) 
+                                {
+                                    writer.WriteVarInt((ushort) id);
+                                    pool.Write(ref writer, entity);
+                                    count.Increment();
+                                }
                             }
                         }
                     }
-                    writer.WriteUshortAt(point, len);
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void WriteEntityAndDestroy(ref BinaryPackWriter writer, Entity entity) {
+                internal void WriteEntityAndDestroy(ref MemoryPackWriter writer, Entity entity) {
                     ref var components = ref ModuleComponents.Value;
                     ref var bitMask = ref components.bitMask;
                     
-                    ushort len = 0;
-                    var point = writer.MakePoint(sizeof(ushort));
-                    
-                    var maskLen = bitMask.MaskLen;
-                    var eid = entity.id - Const.ENTITY_ID_OFFSET;
-                    var masks = bitMask.Chunk(eid);
-                    var start = (eid & Const.ENTITIES_IN_CHUNK_OFFSET_MASK) * maskLen;
-                    for (ushort i = 0; i < maskLen; i++) {
-                        ref var mask = ref masks[start + i];
-                        var offset = i << Const.LONG_SHIFT;
-                        while (mask > 0) {
-                            var id = Utils.PopLsb(ref mask) + offset;
-                            var pool = components._pools[id];
-                            if (!pool.Guid().Equals(Guid.Empty)) {
-                                writer.WriteUshort((ushort) id);
-                                pool.Write(ref writer, entity);
-                                len++;
+                    using (var count = writer.TrackCountShort())
+                    {
+                        var maskLen = bitMask.MaskLen;
+                        var eid = entity.id - Const.ENTITY_ID_OFFSET;
+                        var masks = bitMask.Chunk(eid);
+                        var start = (eid & Const.ENTITIES_IN_CHUNK_OFFSET_MASK) * maskLen;
+                        for (ushort i = 0; i < maskLen; i++) 
+                        {
+                            ref var mask = ref masks[start + i];
+                            var offset = i << Const.LONG_SHIFT;
+                            while (mask > 0) 
+                            {
+                                var id = Utils.PopLsb(ref mask) + offset;
+                                var pool = components._pools[id];
+                                if (!pool.Guid().Equals(Guid.Empty)) 
+                                {
+                                    writer.WriteVarInt((ushort) id);
+                                    pool.Write(ref writer, entity);
+                                    count.Increment();
+                                }
+                                pool.DeleteInternalWithoutMask(entity);
                             }
-                            pool.DeleteInternalWithoutMask(entity);
                         }
                     }
-                    writer.WriteUshortAt(point, len);
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void ReadEntity(ref BinaryPackReader reader, Guid[] componentGuidById, IComponentsWrapper[] dynamicPoolMap, Entity entity) {
-                    var len = reader.ReadUshort();
+                internal void ReadEntity(ref MemoryPackReader reader, Guid[] componentGuidById, IComponentsWrapper[] dynamicPoolMap, Entity entity) {
+                    var len = reader.ReadVarIntUInt16();
 
                     for (var i = 0; i < len; i++) {
-                        var id = reader.ReadUshort();
+                        var id = reader.ReadVarIntUInt16();
                         var pool = dynamicPoolMap[id];
                         if (pool != null) {
                             pool.Read(ref reader, entity);

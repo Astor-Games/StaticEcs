@@ -8,7 +8,8 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Text;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -32,9 +33,9 @@ namespace FFS.Libraries.StaticEcs {
 
         public uint CalculateCount();
         
-        internal void WriteChunk(ref BinaryPackWriter writer, uint chunkIdx);
+        internal void WriteChunk(ref MemoryPackWriter writer, uint chunkIdx);
 
-        internal void ReadChunk(ref BinaryPackReader reader, uint chunkIdx);
+        internal void ReadChunk(ref MemoryPackReader reader, uint chunkIdx);
         
         internal bool Has(uint entity);
 
@@ -119,9 +120,9 @@ namespace FFS.Libraries.StaticEcs {
 
             internal void ClearChunk(uint chunkIdx);
         
-            void Write(ref BinaryPackWriter writer, Entity entity);
+            void Write(ref MemoryPackWriter writer, Entity entity);
 
-            void Read(ref BinaryPackReader reader, Entity entity);
+            void Read(ref MemoryPackReader reader, Entity entity);
 
             internal void UpdateBitMask(uint chunkIdx);
 
@@ -249,10 +250,10 @@ namespace FFS.Libraries.StaticEcs {
             void IComponentsWrapper.Destroy() => Components<T>.Value.Destroy();
 
             [MethodImpl(AggressiveInlining)]
-            public void Write(ref BinaryPackWriter writer, Entity entity) => Components<T>.Serializer.Value.Write(ref writer, ref Components<T>.Value, entity);
+            public void Write(ref MemoryPackWriter writer, Entity entity) => Components<T>.Serializer.Value.Write(ref writer, ref Components<T>.Value, entity);
 
             [MethodImpl(AggressiveInlining)]
-            public void Read(ref BinaryPackReader reader, Entity entity) => Components<T>.Serializer.Value.Read(ref reader, ref Components<T>.Value, entity);
+            public void Read(ref MemoryPackReader reader, Entity entity) => Components<T>.Serializer.Value.Read(ref reader, ref Components<T>.Value, entity);
 
             [MethodImpl(AggressiveInlining)]
             void IComponentsWrapper.UpdateBitMask(uint chunkIdx) => Components<T>.Value.UpdateBitMask(chunkIdx);
@@ -276,10 +277,10 @@ namespace FFS.Libraries.StaticEcs {
             ulong IRawComponentPool.AMask(uint chunkIdx, int blockIdx) => Components<T>.Value.AMask(chunkIdx, blockIdx);
 
             [MethodImpl(AggressiveInlining)]
-            void IRawPool.WriteChunk(ref BinaryPackWriter writer, uint chunkIdx) => Components<T>.Serializer.Value.WriteChunk(ref writer, ref Components<T>.Value, chunkIdx);
+            void IRawPool.WriteChunk(ref MemoryPackWriter writer, uint chunkIdx) => Components<T>.Serializer.Value.WriteChunk(ref writer, ref Components<T>.Value, chunkIdx);
 
             [MethodImpl(AggressiveInlining)]
-            void IRawPool.ReadChunk(ref BinaryPackReader reader, uint chunkIdx) => Components<T>.Serializer.Value.ReadChunk(ref reader, ref Components<T>.Value, chunkIdx);
+            void IRawPool.ReadChunk(ref MemoryPackReader reader, uint chunkIdx) => Components<T>.Serializer.Value.ReadChunk(ref reader, ref Components<T>.Value, chunkIdx);
 
             [MethodImpl(AggressiveInlining)]
             void IComponentsWrapper.ClearChunk(uint chunkIdx) => Components<T>.Value.ClearChunk(chunkIdx);

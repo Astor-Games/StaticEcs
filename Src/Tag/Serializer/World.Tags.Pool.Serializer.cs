@@ -8,7 +8,8 @@
 using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -50,24 +51,24 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void WriteChunk(ref BinaryPackWriter writer, ref Tags<T> pool, uint chunkIdx) {
+                internal void WriteChunk(ref MemoryPackWriter writer, ref Tags<T> pool, uint chunkIdx) {
                     ref var chunk = ref pool.chunks[chunkIdx];
-                    writer.WriteUlong(chunk.notEmptyBlocks);
+                    writer.WriteVarInt(chunk.notEmptyBlocks);
                     if (chunk.notEmptyBlocks != 0) {
-                        writer.WriteUlong(chunk.fullBlocks);
-                        writer.WriteArrayUnmanaged(chunk.entities);
+                        writer.WriteVarInt(chunk.fullBlocks);
+                        writer.WriteUnmanagedArray(chunk.entities);
                     }
                 }
 
                 [MethodImpl(AggressiveInlining)]
-                internal void ReadChunk(ref BinaryPackReader reader, ref Tags<T> pool, uint chunkIdx) {
+                internal void ReadChunk(ref MemoryPackReader reader, ref Tags<T> pool, uint chunkIdx) {
                     ref var chunk = ref pool.chunks[chunkIdx];
                         
-                    chunk.notEmptyBlocks =  reader.ReadUlong();
+                    chunk.notEmptyBlocks =  reader.ReadVarIntUInt64();
                     if (chunk.notEmptyBlocks != 0) {
                         pool.InitChunkSimple(ref chunk, chunkIdx);
-                        chunk.fullBlocks = reader.ReadUlong();
-                        reader.ReadArrayUnmanaged(ref chunk.entities);
+                        chunk.fullBlocks = reader.ReadVarIntUInt64();
+                        reader.ReadUnmanagedArray(ref chunk.entities);
                     } else {
                         chunk.fullBlocks = 0;
                     }
@@ -79,16 +80,16 @@ namespace FFS.Libraries.StaticEcs {
     internal static class TagSerializerUtils {
         
         [MethodImpl(AggressiveInlining)]
-        internal static void DeleteAllTagMigration<WorldType>(this ref BinaryPackReader reader, EcsTagDeleteMigrationReader<WorldType> migration, uint chunkIdx) 
+        internal static void DeleteAllTagMigration<WorldType>(this ref MemoryPackReader reader, EcsTagDeleteMigrationReader<WorldType> migration, uint chunkIdx) 
             where WorldType : struct, IWorldType {
             
             
-            var notEmptyBlocks =  reader.ReadUlong();
+            var notEmptyBlocks =  reader.ReadVarIntUInt64();
             if (notEmptyBlocks != 0) {
                 var entities = ArrayPool<ulong>.Shared.Rent(Const.BLOCK_IN_CHUNK);
                 
-                reader.ReadUlong(); // fullBlocks
-                reader.ReadArrayUnmanaged(ref entities);
+                reader.ReadVarIntUInt64(); // fullBlocks
+                reader.ReadUnmanagedArray(ref entities);
                 
                 #if NET6_0_OR_GREATER
                 ReadOnlySpan<byte> deBruijn = new(Utils.DeBruijn);

@@ -7,7 +7,8 @@
 
 using System;
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -50,9 +51,9 @@ namespace FFS.Libraries.StaticEcs {
 
         internal void Clear();
         
-        internal void WriteAll(ref BinaryPackWriter writer);
+        internal void WriteAll(ref MemoryPackWriter writer);
 
-        internal void ReadAll(ref BinaryPackReader reader);
+        internal void ReadAll(ref MemoryPackReader reader);
     }
     
     #if ENABLE_IL2CPP
@@ -91,10 +92,10 @@ namespace FFS.Libraries.StaticEcs {
         void IEventPoolWrapper.Clear() => World<WorldType>.Events.Pool<T>.Value.Clear();
 
         [MethodImpl(AggressiveInlining)]
-        void IEventPoolWrapper.WriteAll(ref BinaryPackWriter writer) => World<WorldType>.Events.Pool<T>.Serializer.Value.WriteAll(ref writer, ref World<WorldType>.Events.Pool<T>.Value);
+        void IEventPoolWrapper.WriteAll(ref MemoryPackWriter writer) => World<WorldType>.Events.Pool<T>.Serializer.Value.WriteAll(ref writer, ref World<WorldType>.Events.Pool<T>.Value);
 
         [MethodImpl(AggressiveInlining)]
-        void IEventPoolWrapper.ReadAll(ref BinaryPackReader reader) => World<WorldType>.Events.Pool<T>.Serializer.Value.ReadAll(ref reader, ref World<WorldType>.Events.Pool<T>.Value);
+        void IEventPoolWrapper.ReadAll(ref MemoryPackReader reader) => World<WorldType>.Events.Pool<T>.Serializer.Value.ReadAll(ref reader, ref World<WorldType>.Events.Pool<T>.Value);
 
         [MethodImpl(AggressiveInlining)]
         public bool Add() => World<WorldType>.Events.Pool<T>.Value.Add();

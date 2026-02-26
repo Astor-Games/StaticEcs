@@ -8,7 +8,8 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -249,15 +250,15 @@ namespace FFS.Libraries.StaticEcs {
     #endif
     public static class EntityGIDSerializer {
         [MethodImpl(AggressiveInlining)]
-        public static void WriteEntityGID(this ref BinaryPackWriter writer, in EntityGID value) => writer.WriteUlong(value.Raw);
+        public static void WriteEntityGID(this ref MemoryPackWriter writer, in EntityGID value) => writer.WriteVarInt(value.Raw);
 
         [MethodImpl(AggressiveInlining)]
-        public static EntityGID ReadEntityGID(this ref BinaryPackReader reader) => new(reader.ReadUlong());
+        public static EntityGID ReadEntityGID(this ref MemoryPackReader reader) => new(reader.ReadVarIntUInt64());
         
         [MethodImpl(AggressiveInlining)]
-        public static void WriteEntityGIDCompact(this ref BinaryPackWriter writer, in EntityGIDCompact value) => writer.WriteUint(value.Raw);
+        public static void WriteEntityGIDCompact(this ref MemoryPackWriter writer, in EntityGIDCompact value) => writer.WriteVarInt(value.Raw);
 
         [MethodImpl(AggressiveInlining)]
-        public static EntityGIDCompact ReadEntityGIDCompact(this ref BinaryPackReader reader) => new(reader.ReadUint());
+        public static EntityGIDCompact ReadEntityGIDCompact(this ref MemoryPackReader reader) => new(reader.ReadVarIntUInt32());
     }
 }

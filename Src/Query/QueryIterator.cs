@@ -8,7 +8,8 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -422,7 +423,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         
         [MethodImpl(AggressiveInlining)]
-        internal void WriteEntitySnapshotData(ref BinaryPackWriter writer, CustomSnapshotEntityDataWriter<WorldType> snapshotDataEntityWriter, SnapshotWriteParams snapshotParams) {
+        internal void WriteEntitySnapshotData(ref MemoryPackWriter writer, CustomSnapshotEntityDataWriter<WorldType> snapshotDataEntityWriter, SnapshotWriteParams snapshotParams) {
             DisposePart1();
             var entity = new World<WorldType>.Entity();
             ref var eid = ref entity.id;
@@ -451,7 +452,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         
         [MethodImpl(AggressiveInlining)]
-        internal void ReadEntitySnapshotData(ref BinaryPackReader reader, CustomSnapshotEntityDataReader<WorldType> snapshotDataEntityReader, ushort version, SnapshotReadParams snapshotParams) {
+        internal void ReadEntitySnapshotData(ref MemoryPackReader reader, CustomSnapshotEntityDataReader<WorldType> snapshotDataEntityReader, ushort version, SnapshotReadParams snapshotParams) {
             DisposePart1();
             var entity = new World<WorldType>.Entity();
             ref var eid = ref entity.id;

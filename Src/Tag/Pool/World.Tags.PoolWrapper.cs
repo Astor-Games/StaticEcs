@@ -8,7 +8,8 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Text;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -131,10 +132,10 @@ namespace FFS.Libraries.StaticEcs {
             ulong IRawTagPool.EMask(uint chunkIdx, int blockIdx) => Tags<T>.Value.EMask(chunkIdx, blockIdx);
 
             [MethodImpl(AggressiveInlining)]
-            void IRawPool.WriteChunk(ref BinaryPackWriter writer, uint chunkIdx) => Tags<T>.Serializer.Value.WriteChunk(ref writer, ref Tags<T>.Value, chunkIdx);
+            void IRawPool.WriteChunk(ref MemoryPackWriter writer, uint chunkIdx) => Tags<T>.Serializer.Value.WriteChunk(ref writer, ref Tags<T>.Value, chunkIdx);
 
             [MethodImpl(AggressiveInlining)]
-            void IRawPool.ReadChunk(ref BinaryPackReader reader, uint chunkIdx) => Tags<T>.Serializer.Value.ReadChunk(ref reader, ref Tags<T>.Value, chunkIdx);
+            void IRawPool.ReadChunk(ref MemoryPackReader reader, uint chunkIdx) => Tags<T>.Serializer.Value.ReadChunk(ref reader, ref Tags<T>.Value, chunkIdx);
 
             [MethodImpl(AggressiveInlining)]
             void IRawPool.PutRaw(uint entity, object value) => Tags<T>.Value.Set(new Entity(entity));

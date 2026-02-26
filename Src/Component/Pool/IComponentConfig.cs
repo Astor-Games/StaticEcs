@@ -6,7 +6,8 @@
 #endif
 
 using System;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 
 namespace FFS.Libraries.StaticEcs {
     public interface IComponentConfig<T, WorldType>

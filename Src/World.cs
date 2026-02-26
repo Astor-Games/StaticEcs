@@ -8,7 +8,8 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -56,12 +57,12 @@ namespace FFS.Libraries.StaticEcs {
             CurrentQuery.QueryMode = 0;
             #endif
 
-            if (!BinaryPack.IsRegistered<EntityGID>()) {
-                BinaryPack.RegisterWithCollections<EntityGID, UnmanagedPackArrayStrategy<EntityGID>>(EntityGIDSerializer.WriteEntityGID, EntityGIDSerializer.ReadEntityGID);
+            if (!MemoryPackFormatterProvider.IsRegistered<EntityGID>()) {
+                MemoryPackFormatterProvider.RegisterWithCollections<EntityGID, UnmanagedPackArrayStrategy<EntityGID>>(EntityGIDSerializer.WriteEntityGID, EntityGIDSerializer.ReadEntityGID);
             }
 
-            if (!BinaryPack.IsRegistered<EntityGIDCompact>()) {
-                BinaryPack.RegisterWithCollections<EntityGIDCompact, UnmanagedPackArrayStrategy<EntityGIDCompact>>(EntityGIDSerializer.WriteEntityGIDCompact, EntityGIDSerializer.ReadEntityGIDCompact);
+            if (!MemoryPackFormatterProvider.IsRegistered<EntityGIDCompact>()) {
+                MemoryPackFormatterProvider.RegisterWithCollections<EntityGIDCompact, UnmanagedPackArrayStrategy<EntityGIDCompact>>(EntityGIDSerializer.WriteEntityGIDCompact, EntityGIDSerializer.ReadEntityGIDCompact);
             }
 
             Worlds.Set(typeof(WorldType), new WorldWrapper<WorldType>());
@@ -86,7 +87,7 @@ namespace FFS.Libraries.StaticEcs {
             #endif
         }
 
-        public static void InitializeFromGIDStoreSnapshot(BinaryPackReader reader) {
+        public static void InitializeFromGIDStoreSnapshot(MemoryPackReader reader) {
             #if FFS_ECS_DEBUG
             AssertWorldIsCreated(WorldTypeName);
             #endif
@@ -125,7 +126,7 @@ namespace FFS.Libraries.StaticEcs {
             #endif
         }
 
-        public static void InitializeFromWorldSnapshot(BinaryPackReader reader) {
+        public static void InitializeFromWorldSnapshot(MemoryPackReader reader) {
             #if FFS_ECS_DEBUG
             AssertWorldIsCreated(WorldTypeName);
             #endif

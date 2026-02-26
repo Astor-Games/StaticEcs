@@ -10,7 +10,8 @@ using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -1648,41 +1649,41 @@ namespace FFS.Libraries.StaticEcs {
             }
             
             [MethodImpl(AggressiveInlining)]
-            internal void Write(ref BinaryPackWriter writer, ChunkWritingStrategy strategy, ReadOnlySpan<ushort> clustersToWrite, ref TempChunksData tempChunks, bool fullWorld) {
-                writer.WriteInt(chunks.Length);
-                writer.WriteInt(clusters.Length);
-                writer.WriteInt(clustersToWrite.Length);
+            internal void Write(ref MemoryPackWriter writer, ChunkWritingStrategy strategy, ReadOnlySpan<ushort> clustersToWrite, ref TempChunksData tempChunks, bool fullWorld) {
+                writer.WriteVarInt(chunks.Length);
+                writer.WriteVarInt(clusters.Length);
+                writer.WriteVarInt(clustersToWrite.Length);
                 
                 for (var i = 0; i < clustersToWrite.Length; i++) {
                     var clusterId = clustersToWrite[i];
                     ref var cluster = ref clusters[clusterId];
                 
-                    writer.WriteUshort(clusterId);
+                    writer.WriteVarInt(clusterId);
                     writer.WriteBool(cluster.disabled);
-                    writer.WriteInt(cluster.chunks.Length);
-
-                    uint count = 0;
-                    var offset = writer.MakePoint(sizeof(uint));
-                    for (uint j = 0; j < cluster.chunksCount; j++) {
-                        var chunkIdx = cluster.chunks[j];
-                        ref var chunk = ref chunks[chunkIdx];
+                    writer.WriteVarInt(cluster.chunks.Length);
+                    
+                    using (var count = writer.TrackCount())
+                    {
+                        for (uint j = 0; j < cluster.chunksCount; j++) {
+                            var chunkIdx = cluster.chunks[j];
+                            ref var chunk = ref chunks[chunkIdx];
                         
-                        if (strategy == ChunkWritingStrategy.All || (strategy == ChunkWritingStrategy.SelfOwner && chunk.selfOwner) || (strategy == ChunkWritingStrategy.OtherOwner && !chunk.selfOwner)) {
-                            writer.WriteUint(chunkIdx);
-                            WriteChunk(ref writer, ref chunk, fullWorld);
-                            tempChunks.Add(chunkIdx);
-                            count++;
+                            if (strategy == ChunkWritingStrategy.All || (strategy == ChunkWritingStrategy.SelfOwner && chunk.selfOwner) || (strategy == ChunkWritingStrategy.OtherOwner && !chunk.selfOwner)) {
+                                writer.WriteVarInt(chunkIdx);
+                                WriteChunk(ref writer, ref chunk, fullWorld);
+                                tempChunks.Add(chunkIdx);
+                                count.Increment();
+                            }
                         }
                     }
-                    writer.WriteUintAt(offset, count);
                 }
             }
 
             [MethodImpl(AggressiveInlining)]
-            internal void Read(ref BinaryPackReader reader, bool fullWorld) {
-                var chunksCapacity = reader.ReadInt();
-                var clustersCapacity = reader.ReadInt();
-                var clustersCount = reader.ReadInt();
+            internal void Read(ref MemoryPackReader reader, bool fullWorld) {
+                var chunksCapacity = reader.ReadVarIntInt32();
+                var clustersCapacity = reader.ReadVarIntInt32();
+                var clustersCount = reader.ReadVarIntInt32();
 
                 if (IsWorldInitialized()) {
                     Clear();
@@ -1699,9 +1700,9 @@ namespace FFS.Libraries.StaticEcs {
                 }
                 
                 for (var i = 0; i < clustersCount; i++) {
-                    var clusterId = reader.ReadUshort();
+                    var clusterId = reader.ReadVarIntUInt16();
                     var disabled = reader.ReadBool();
-                    var chunksClusterCapacity = reader.ReadInt();
+                    var chunksClusterCapacity = reader.ReadVarIntInt32();
                     
                     RegisterCluster(clusterId);
                     
@@ -1713,9 +1714,9 @@ namespace FFS.Libraries.StaticEcs {
                     
                     cluster.disabled = disabled;
                     
-                    var count = reader.ReadUint();
+                    var count = reader.ReadVarIntUInt32();
                     for (var j = 0; j < count; j++) {
-                        var chunkIdx = reader.ReadUint();
+                        var chunkIdx = reader.ReadVarIntUInt32();
                         ref var chunk = ref chunks[chunkIdx];
                         ReadChunk(ref reader, ref chunk, fullWorld);
                         
@@ -1737,42 +1738,42 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            internal void WriteChunk(ref BinaryPackWriter writer, ref EntitiesChunk chunk, bool fullWorld) {
+            internal void WriteChunk(ref MemoryPackWriter writer, ref EntitiesChunk chunk, bool fullWorld) {
                 writer.WriteBool(chunk.selfOwner);
-                writer.WriteUlong(chunk.notEmptyBlocks);
-                writer.WriteUlong(chunk.fullBlocks);
-                writer.WriteInt(chunk.clusterId);
+                writer.WriteVarInt(chunk.notEmptyBlocks);
+                writer.WriteVarInt(chunk.fullBlocks);
+                writer.WriteVarInt(chunk.clusterId);
 
                 if (chunk.notEmptyBlocks != 0) {
-                    writer.WriteArrayUnmanaged(chunk.entities, 0, Const.BLOCK_IN_CHUNK);
-                    writer.WriteArrayUnmanaged(chunk.disabledEntities, 0, Const.BLOCK_IN_CHUNK);
+                    writer.WriteUnmanagedArray(chunk.entities);
+                    writer.WriteUnmanagedArray(chunk.disabledEntities);
                     if (fullWorld) {
-                        writer.WriteInt(chunk.loadedEntitiesCount);
-                        writer.WriteArrayUnmanaged(chunk.loadedEntities, 0, Const.BLOCK_IN_CHUNK);
+                        writer.WriteVarInt(chunk.loadedEntitiesCount);
+                        writer.WriteUnmanagedArray(chunk.loadedEntities);
                     }
                 }
 
-                writer.WriteArrayUnmanaged(chunk.versions, 0, Const.ENTITIES_IN_CHUNK);
+                writer.WriteUnmanagedArray(chunk.versions);
             }
 
             [MethodImpl(AggressiveInlining)]
-            internal void ReadChunk(ref BinaryPackReader reader, ref EntitiesChunk chunk, bool fullWorld) {
+            internal void ReadChunk(ref MemoryPackReader reader, ref EntitiesChunk chunk, bool fullWorld) {
                 chunk.selfOwner = reader.ReadBool();
-                chunk.notEmptyBlocks = reader.ReadUlong();
-                chunk.fullBlocks = reader.ReadUlong();
-                chunk.clusterId = reader.ReadInt();
+                chunk.notEmptyBlocks = reader.ReadVarIntUInt64();
+                chunk.fullBlocks = reader.ReadVarIntUInt64();
+                chunk.clusterId = reader.ReadVarIntInt32();
                 chunk.loadedEntitiesCount = 0;
 
                 if (chunk.notEmptyBlocks != 0) {
-                    reader.ReadArrayUnmanaged(ref chunk.entities);
-                    reader.ReadArrayUnmanaged(ref chunk.disabledEntities);
+                    reader.ReadUnmanagedArray(ref chunk.entities);
+                    reader.ReadUnmanagedArray(ref chunk.disabledEntities);
                     if (fullWorld) {
-                        chunk.loadedEntitiesCount = reader.ReadInt();
-                        reader.ReadArrayUnmanaged(ref chunk.loadedEntities);
+                        chunk.loadedEntitiesCount = reader.ReadVarIntInt32();
+                        reader.ReadUnmanagedArray(ref chunk.loadedEntities);
                     }
                 }
 
-                reader.ReadArrayUnmanaged(ref chunk.versions);
+                reader.ReadUnmanagedArray(ref chunk.versions);
             }
             #endregion
 

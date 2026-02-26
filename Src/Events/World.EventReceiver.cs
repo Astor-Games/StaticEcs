@@ -7,7 +7,8 @@
 
 using System;
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -70,10 +71,10 @@ namespace FFS.Libraries.StaticEcs {
     #endif
     public static class EventReceiverSerializer {
         [MethodImpl(AggressiveInlining)]
-        public static void WriteEventReceiver<WorldType, T>(this ref BinaryPackWriter writer, in EventReceiver<WorldType, T> value) where WorldType : struct, IWorldType where T : struct, IEvent => writer.WriteInt(value._id);
+        public static void WriteEventReceiver<WorldType, T>(this ref MemoryPackWriter writer, in EventReceiver<WorldType, T> value) where WorldType : struct, IWorldType where T : struct, IEvent => writer.WriteVarInt(value._id);
 
         [MethodImpl(AggressiveInlining)]
-        public static EventReceiver<WorldType, T> ReadEventReceiver<WorldType, T>(this ref BinaryPackReader reader) where WorldType : struct, IWorldType where T : struct, IEvent => new(reader.ReadInt());
+        public static EventReceiver<WorldType, T> ReadEventReceiver<WorldType, T>(this ref MemoryPackReader reader) where WorldType : struct, IWorldType where T : struct, IEvent => new(reader.ReadVarIntInt32());
     }
     
     #if ENABLE_IL2CPP

@@ -1,18 +1,19 @@
 ﻿using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
 #endif
 
 namespace FFS.Libraries.StaticEcs {
-    public delegate T EcsEventMigrationReader<T, WorldType>(ref BinaryPackReader reader, byte version)
+    public delegate T EcsEventMigrationReader<T, WorldType>(ref MemoryPackReader reader, byte version)
         where T : struct
         where WorldType : struct, IWorldType;
 
-    public delegate void EcsEventDeleteMigrationReader<WorldType>(ref BinaryPackReader reader, byte version)
+    public delegate void EcsEventDeleteMigrationReader<WorldType>(ref MemoryPackReader reader, byte version)
         where WorldType : struct, IWorldType;
 
     #if ENABLE_IL2CPP
@@ -45,10 +46,10 @@ namespace FFS.Libraries.StaticEcs {
 
                     [MethodImpl(AggressiveInlining)]
                     public void Create(IEventConfig<T, WorldType> config) {
-                        if (!BinaryPack.IsRegistered<EventReceiver<WorldType, T>>()) {
-                            BinaryPack.RegisterWithCollections<EventReceiver<WorldType, T>, UnmanagedPackArrayStrategy<EventReceiver<WorldType, T>>>(
-                                (ref BinaryPackWriter writer, in EventReceiver<WorldType, T> value) => writer.WriteInt(value._id),
-                                (ref BinaryPackReader reader) => new EventReceiver<WorldType, T>(reader.ReadInt())
+                        if (!MemoryPackFormatterProvider.IsRegistered<EventReceiver<WorldType, T>>()) {
+                            MemoryPackFormatterProvider.RegisterWithCollections<EventReceiver<WorldType, T>, UnmanagedPackArrayStrategy<EventReceiver<WorldType, T>>>(
+                                (ref MemoryPackWriter writer, in EventReceiver<WorldType, T> value) => writer.WriteVarInt(value._id),
+                                (ref MemoryPackReader reader) => new EventReceiver<WorldType, T>(reader.ReadVarIntInt32())
                             );
                         }
                         
@@ -57,7 +58,7 @@ namespace FFS.Libraries.StaticEcs {
                         if (guid != Guid.Empty) {
                             _readWriteArrayStrategy = config.ReadWriteStrategy();
                             _migrationReader = config.MigrationReader();
-                            BinaryPack.RegisterWithCollections(config.Writer(), config.Reader(), _readWriteArrayStrategy);
+                            MemoryPackFormatterProvider.RegisterWithCollections(config.Writer(), config.Reader(), _readWriteArrayStrategy);
                         }
                     }
 
@@ -70,13 +71,13 @@ namespace FFS.Libraries.StaticEcs {
                     }
 
                     [MethodImpl(AggressiveInlining)]
-                    internal void WriteAll(ref BinaryPackWriter writer, ref Pool<T> pool) {
+                    internal void WriteAll(ref MemoryPackWriter writer, ref Pool<T> pool) {
                         var notEmpty = pool.receiversCount > pool.deletedReceiversCount;
-                        writer.WriteByte(version);
-                        writer.WriteUlong(pool.sequence);
+                        writer.WriteVarInt(version);
+                        writer.WriteVarInt(pool.sequence);
                         writer.WriteBool(notEmpty);
-                        writer.WriteUshort((ushort) pool.receivers.Length);
-                        writer.WriteArrayUnmanaged(pool.receivers, 0, pool.receiversCount);
+                        writer.WriteVarInt((ushort) pool.receivers.Length);
+                        writer.WriteUnmanagedArray(pool.receivers);
                         
                         if (notEmpty) {
                             var minSeq = pool.sequence;
@@ -93,52 +94,53 @@ namespace FFS.Libraries.StaticEcs {
 
                             var isUnmanaged = _readWriteArrayStrategy.IsUnmanaged();
                             writer.WriteBool(isUnmanaged);
-                            ushort count = 0;
-                            var offset = writer.MakePoint(sizeof(ushort));
-                            while (curPageIdx <= maxPageIdx) {
-                                if (curPageIdx == maxPageIdx && maxInPageIdx == 0) {
-                                    break;
-                                }
+
+                            using (var count = writer.TrackCountShort())
+                            {
+                                while (curPageIdx <= maxPageIdx) {
+                                    if (curPageIdx == maxPageIdx && maxInPageIdx == 0) {
+                                        break;
+                                    }
                                 
-                                ref var page = ref pool.pages[curPageIdx];
-                                writer.WriteUint(curPageIdx);
-                                writer.WriteUshort(page.Version);
-                                writer.WriteArrayUnmanaged(page.Mask);
-                                writer.WriteArrayUnmanaged(page.UnreadReceiversCount);
-                                if (isUnmanaged) {
-                                    _readWriteArrayStrategy.WriteArray(ref writer, page.Data);
-                                } else {
-                                    for (var eIdx = 0; eIdx < EVENTS_PER_PAGE; eIdx++) {
-                                        if ((page.Mask[eIdx >> EVENT_IN_PAGE_MASK_SHIFT] & (1Ul << (eIdx & EVENT_IN_PAGE_OFFSET_MASK))) != 0) {
-                                            writer.Write(in page.Data[eIdx]);
+                                    ref var page = ref pool.pages[curPageIdx];
+                                    writer.WriteVarInt(curPageIdx);
+                                    writer.WriteVarInt(page.Version);
+                                    writer.WriteUnmanagedArray(page.Mask);
+                                    writer.WriteUnmanagedArray(page.UnreadReceiversCount);
+                                    if (isUnmanaged) {
+                                        _readWriteArrayStrategy.WriteArray(ref writer, page.Data);
+                                    } else {
+                                        for (var eIdx = 0; eIdx < EVENTS_PER_PAGE; eIdx++) {
+                                            if ((page.Mask[eIdx >> EVENT_IN_PAGE_MASK_SHIFT] & (1Ul << (eIdx & EVENT_IN_PAGE_OFFSET_MASK))) != 0) {
+                                                writer.WriteValue(in page.Data[eIdx]);
+                                            }
                                         }
                                     }
+                                    count.Increment();
+                                    curPageIdx++;
                                 }
-                                count++;
-                                curPageIdx++;
                             }
-                            writer.WriteUshortAt(offset, count);
                         }
                     }
 
                     [MethodImpl(AggressiveInlining)]
-                    internal void ReadAll(ref BinaryPackReader reader, ref Pool<T> pool) {
-                        var oldVersion = reader.ReadByte();
-                        pool.sequence = reader.ReadUlong();
+                    internal void ReadAll(ref MemoryPackReader reader, ref Pool<T> pool) {
+                        var oldVersion = reader.ReadVarIntByte();
+                        pool.sequence = reader.ReadVarIntUInt64();
                         var notEmpty = reader.ReadBool();
-                        var len = reader.ReadUshort();
+                        var len = reader.ReadVarIntUInt16();
                         if (len > pool.receivers.Length) {
                             Array.Resize(ref pool.receivers, len);
                         }
-                        reader.ReadArrayUnmanaged(ref pool.receivers);
+                        reader.ReadUnmanagedArray(ref pool.receivers);
 
                         if (notEmpty) {
                             var isUnmanaged = reader.ReadBool();
-                            var count = reader.ReadUshort();
+                            var count = reader.ReadVarIntUInt16();
                             for (var i = 0; i < count; i++) {
-                                var pageIdx = reader.ReadUint();
+                                var pageIdx = reader.ReadVarIntUInt32();
                                 ref var page = ref pool.pages[pageIdx];
-                                page.Version = reader.ReadUshort();
+                                page.Version = reader.ReadVarIntUInt16();
                                 
                                 if (pool.freePagesCount > 0) {
                                     page.FromFree(ref pool.freePages[--pool.freePagesCount]);
@@ -146,15 +148,15 @@ namespace FFS.Libraries.StaticEcs {
                                     page.InitNew();
                                     pool.maxPagesCount++;
                                 }
-                                reader.ReadArrayUnmanaged(ref page.Mask);
-                                reader.ReadArrayUnmanaged(ref page.UnreadReceiversCount);
+                                reader.ReadUnmanagedArray(ref page.Mask);
+                                reader.ReadUnmanagedArray(ref page.UnreadReceiversCount);
                                 if (version == oldVersion) {
                                     if (isUnmanaged) {
                                         _readWriteArrayStrategy.ReadArray(ref reader, ref page.Data);
                                     } else {
                                         for (var eIdx = 0; eIdx < EVENTS_PER_PAGE; eIdx++) {
                                             if ((page.Mask[eIdx >> EVENT_IN_PAGE_MASK_SHIFT] & (1Ul << (eIdx & EVENT_IN_PAGE_OFFSET_MASK))) != 0) {
-                                                page.Data[eIdx] = reader.Read<T>();
+                                                page.Data[eIdx] = reader.ReadValue<T>();
                                             }
                                         }
                                     }
@@ -162,15 +164,15 @@ namespace FFS.Libraries.StaticEcs {
                                     uint oneSize = default;
                                     if (isUnmanaged) {
                                         _ = reader.ReadNullFlag();
-                                        var size = reader.ReadInt();
-                                        var byteSize = reader.ReadUint();
+                                        var size = reader.ReadVarIntInt32();
+                                        var byteSize = reader.ReadVarIntUInt32();
                                         oneSize = (uint) (byteSize / size);
                                     }
                                     for (var eIdx = 0; eIdx < EVENTS_PER_PAGE; eIdx++) {
                                         if ((page.Mask[eIdx >> EVENT_IN_PAGE_MASK_SHIFT] & (1Ul << (eIdx & EVENT_IN_PAGE_OFFSET_MASK))) != 0) {
                                             page.Data[eIdx] = _migrationReader(ref reader, oldVersion);
                                         } else if (isUnmanaged) {
-                                            reader.SkipNext(oneSize);
+                                            reader.Advance(oneSize);
                                         }
                                     }
                                 }
@@ -185,31 +187,31 @@ namespace FFS.Libraries.StaticEcs {
     internal static class EventSerializerUtils {
         [MethodImpl(AggressiveInlining)]
         [SuppressMessage("ReSharper", "UnusedVariable")]
-        internal static void DeleteAllEventMigration<WorldType>(this ref BinaryPackReader reader, EcsEventDeleteMigrationReader<WorldType> migration)
+        internal static void DeleteAllEventMigration<WorldType>(this ref MemoryPackReader reader, EcsEventDeleteMigrationReader<WorldType> migration)
             where WorldType : struct, IWorldType {
-            var oldVersion = reader.ReadByte();
-            var sequence = reader.ReadUlong();
+            var oldVersion = reader.ReadVarIntByte();
+            var sequence = reader.ReadVarIntUInt64();
             var notEmpty = reader.ReadBool();
-            var len = reader.ReadUshort();
+            var len = reader.ReadVarIntUInt16();
 
-            reader.ReadArrayUnmanagedPooled<ReceiverData>(out var handle);
+            reader.ReadUnmanagedArrayPooled<ReceiverData>(out var handle);
             handle.Return();
             
             if (notEmpty) {
                 var isUnmanaged = reader.ReadBool();
-                var count = reader.ReadUshort();
+                var count = reader.ReadVarIntUInt16();
                 for (var i = 0; i < count; i++) {
-                    var pageIdx = reader.ReadUint();
-                    var Version = reader.ReadUshort();
+                    var pageIdx = reader.ReadVarIntUInt32();
+                    var Version = reader.ReadVarIntUInt16();
 
-                    var mask = reader.ReadArrayUnmanagedPooled<ulong>(out var maskHandle).Array!;
-                    reader.ReadArrayUnmanagedPooled<ushort>(out var unreadReceiversCountHandle);
+                    var mask = reader.ReadUnmanagedArrayPooled<ulong>(out var maskHandle).Array!;
+                    reader.ReadUnmanagedArrayPooled<ushort>(out var unreadReceiversCountHandle);
                     unreadReceiversCountHandle.Return();
                     uint oneSize = default;
                     if (isUnmanaged) {
                         _ = reader.ReadNullFlag();
-                        var size = reader.ReadInt();
-                        var byteSize = reader.ReadUint();
+                        var size = reader.ReadVarIntInt32();
+                        var byteSize = reader.ReadVarIntUInt32();
                         oneSize = (uint) (byteSize / size);
                     }
 
@@ -217,7 +219,7 @@ namespace FFS.Libraries.StaticEcs {
                         if ((mask[eIdx >> World<WorldType>.Events.EVENT_IN_PAGE_MASK_SHIFT] & (1Ul << (eIdx & World<WorldType>.Events.EVENT_IN_PAGE_OFFSET_MASK))) != 0) {
                             migration(ref reader, oldVersion);
                         } else if (isUnmanaged) {
-                            reader.SkipNext(oneSize);
+                            reader.Advance(oneSize);
                         }
                     }
                     maskHandle.Return();

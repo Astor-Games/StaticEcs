@@ -55,17 +55,17 @@ public struct Scale : IComponent {
 
         // component writer for serialization (more details in `Serialization` section)
         public BinaryWriter<Scale> Writer() {
-            return (ref BinaryPackWriter writer, in Scale value) => { };
+            return (ref MemoryPackWriter writer, in Scale value) => { };
         }
 
         // component reader for serialization (more details in `Serializations` section)
         public BinaryReader<Scale> Reader() {
-            return (ref BinaryPackReader reader) => { };
+            return (ref MemoryPackReader reader) => { };
         }
 
         // component migration when changing for serialization (more details in `Serialization` section)
         public EcsComponentMigrationReader<Scale, WorldType> MigrationReader() {
-            return (ref BinaryPackReader reader, World<WorldType>.Entity entity, byte version, bool disabled) => { };
+            return (ref MemoryPackReader reader, World<WorldType>.Entity entity, byte version, bool disabled) => { };
         }
 
         // read/write strategy of a component when creating a snapshot of the world for serialization (see `Serialization` section for details)

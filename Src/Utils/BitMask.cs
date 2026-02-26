@@ -9,7 +9,8 @@ using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -181,13 +182,13 @@ namespace FFS.Libraries.StaticEcs {
         }
         
         [MethodImpl(AggressiveInlining)]
-        public void WriteChunk(ref BinaryPackWriter writer, uint chunkIdx) {
-            writer.WriteArrayUnmanaged(chunks[chunkIdx]);
+        public void WriteChunk(ref MemoryPackWriter writer, uint chunkIdx) {
+            writer.WriteUnmanagedArray(chunks[chunkIdx]);
         }
         
         [MethodImpl(AggressiveInlining)]
-        public void ReadChunk(ref BinaryPackReader reader, uint chunkIdx) {
-            reader.ReadArrayUnmanaged(ref chunks[chunkIdx]);
+        public void ReadChunk(ref MemoryPackReader reader, uint chunkIdx) {
+            reader.ReadUnmanagedArray(ref chunks[chunkIdx]);
         }
     }
 }

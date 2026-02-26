@@ -8,7 +8,8 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 using static System.Runtime.CompilerServices.MethodImplOptions;
 #if ENABLE_IL2CPP
 using Unity.IL2CPP.CompilerServices;
@@ -26,13 +27,13 @@ namespace FFS.Libraries.StaticEcs {
     public delegate void SnapshotOnReadEntityAction<WorldType>(World<WorldType>.Entity entity, SnapshotReadParams snapshotParams)
         where WorldType : struct, IWorldType;
     
-    public delegate void CustomSnapshotDataReader(ref BinaryPackReader reader, ushort version, SnapshotReadParams snapshotParams);
+    public delegate void CustomSnapshotDataReader(ref MemoryPackReader reader, ushort version, SnapshotReadParams snapshotParams);
 
-    public delegate void CustomSnapshotDataWriter(ref BinaryPackWriter writer, SnapshotWriteParams snapshotParams);
+    public delegate void CustomSnapshotDataWriter(ref MemoryPackWriter writer, SnapshotWriteParams snapshotParams);
 
-    public delegate void CustomSnapshotEntityDataReader<WorldType>(ref BinaryPackReader reader, World<WorldType>.Entity entity, ushort version, SnapshotReadParams snapshotParams) where WorldType : struct, IWorldType;
+    public delegate void CustomSnapshotEntityDataReader<WorldType>(ref MemoryPackReader reader, World<WorldType>.Entity entity, ushort version, SnapshotReadParams snapshotParams) where WorldType : struct, IWorldType;
 
-    public delegate void CustomSnapshotEntityDataWriter<WorldType>(ref BinaryPackWriter writer, World<WorldType>.Entity entity, SnapshotWriteParams snapshotParams) where WorldType : struct, IWorldType;
+    public delegate void CustomSnapshotEntityDataWriter<WorldType>(ref MemoryPackWriter writer, World<WorldType>.Entity entity, SnapshotWriteParams snapshotParams) where WorldType : struct, IWorldType;
 
     public enum SnapshotType: byte {
         GIDStore,
@@ -194,87 +195,89 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void WriteSnapshotData(ref BinaryPackWriter writer, SnapshotWriteParams snapshotParams) {
-                writer.WriteInt(SnapshotDataSerializers.Count);
+            public static void WriteSnapshotData(ref MemoryPackWriter writer, SnapshotWriteParams snapshotParams) {
+                writer.WriteVarInt(SnapshotDataSerializers.Count);
                 foreach (var (key, (snapshotDataWriter, _, version)) in SnapshotDataSerializers) {
                     writer.WriteGuid(key);
-                    writer.WriteUshort(version);
-                    var point = writer.MakePoint(sizeof(uint));
-                    snapshotDataWriter(ref writer, snapshotParams);
-                    writer.WriteUintAt(point, writer.Position - (point + sizeof(uint)));
-                }
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            public static void ReadSnapshotData(ref BinaryPackReader reader, SnapshotReadParams snapshotParams) {
-                var count = reader.ReadInt();
-
-                for (var i = 0; i < count; i++) {
-                    var key = reader.ReadGuid();
-                    var version = reader.ReadUshort();
-                    var byteSize = reader.ReadUint();
-                    if (SnapshotDataSerializers.TryGetValue(key, out var val)) {
-                        val.reader(ref reader, version, snapshotParams);
-                    } else {
-                        reader.SkipNext(byteSize);
+                    writer.WriteVarInt(version);
+                    using (writer.TrackWritten())
+                    {
+                        snapshotDataWriter(ref writer, snapshotParams);
                     }
                 }
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void WriteEntitySnapshotData(ref BinaryPackWriter writer, SnapshotWriteParams snapshotParams, ReadOnlySpan<uint> chunks) {
-                writer.WriteInt(SnapshotDataEntitySerializers.Count);
-                foreach (var (key, (snapshotDataEntityWriter, _, version)) in SnapshotDataEntitySerializers) {
-                    writer.WriteGuid(key);
-                    writer.WriteUshort(version);
-                    var point = writer.MakePoint(sizeof(uint));
-                    Query.Entities(chunks, EntityStatusType.Any).WriteEntitySnapshotData(ref writer, snapshotDataEntityWriter, snapshotParams);
-                    writer.WriteUintAt(point, writer.Position - (point + sizeof(uint)));
+            public static void ReadSnapshotData(ref MemoryPackReader reader, SnapshotReadParams snapshotParams) {
+                var count = reader.ReadVarIntInt32();
+
+                for (var i = 0; i < count; i++) {
+                    var key = reader.ReadGuid();
+                    var version = reader.ReadVarIntUInt16();
+                    var byteSize = reader.ReadVarIntInt32();
+                    if (SnapshotDataSerializers.TryGetValue(key, out var val)) {
+                        val.reader(ref reader, version, snapshotParams);
+                    } else {
+                        reader.Advance(byteSize);
+                    }
                 }
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void ReadEntitySnapshotData(ref BinaryPackReader reader, SnapshotReadParams snapshotParams, ReadOnlySpan<uint> chunks) {
-                var count = reader.ReadInt();
+            public static void WriteEntitySnapshotData(ref MemoryPackWriter writer, SnapshotWriteParams snapshotParams, ReadOnlySpan<uint> chunks) {
+                writer.WriteVarInt(SnapshotDataEntitySerializers.Count);
+                foreach (var (key, (snapshotDataEntityWriter, _, version)) in SnapshotDataEntitySerializers) {
+                    writer.WriteGuid(key);
+                    writer.WriteVarInt(version);
+                    using (writer.TrackWritten())
+                    {
+                        Query.Entities(chunks, EntityStatusType.Any).WriteEntitySnapshotData(ref writer, snapshotDataEntityWriter, snapshotParams);
+                    }
+                }
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            public static void ReadEntitySnapshotData(ref MemoryPackReader reader, SnapshotReadParams snapshotParams, ReadOnlySpan<uint> chunks) {
+                var count = reader.ReadVarIntInt32();
 
                 for (var i = 0; i < count; i++) {
                     var key = reader.ReadGuid();
-                    var version = reader.ReadUshort();
-                    var byteSize = reader.ReadUint();
+                    var version = reader.ReadVarIntUInt16();
+                    var byteSize = reader.ReadVarIntInt32();
                     if (SnapshotDataEntitySerializers.TryGetValue(key, out var val)) {
                         Query.Entities(chunks, EntityStatusType.Any).ReadEntitySnapshotData(ref reader, val.reader, version, snapshotParams);
                     } else {
-                        reader.SkipNext(byteSize);
+                        reader.Advance(byteSize);
                     }
                 }
             }
 
             [MethodImpl(AggressiveInlining)]
             public static byte[] CreateWorldSnapshot(bool withCustomSnapshotData = true, bool gzip = false, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, ReadOnlySpan<ushort> clusters = default, bool writeEvents = true) {
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 WriteWorld(ref writer, withCustomSnapshotData, strategy, clusters, writeEvents);
                 var result = writer.CopyToBytes(gzip);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
                 return result;
             }
 
             [MethodImpl(AggressiveInlining)]
             public static void CreateWorldSnapshot(ref byte[] result, bool withCustomSnapshotData = true, bool gzip = false, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, ReadOnlySpan<ushort> clusters = default, bool writeEvents = true) {
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 WriteWorld(ref writer, withCustomSnapshotData, strategy, clusters, writeEvents);
                 writer.CopyToBytes(ref result, gzip);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             [MethodImpl(AggressiveInlining)]
             public static void CreateWorldSnapshot(string filePath, bool withCustomSnapshotData = true, bool gzip = false, bool flushToDisk = false) {
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 CreateWorldSnapshot(ref writer, filePath, withCustomSnapshotData, gzip, flushToDisk);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void CreateWorldSnapshot(ref BinaryPackWriter writer, bool withCustomSnapshotData = true, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, ReadOnlySpan<ushort> clusters = default, bool writeEvents = true) {
+            public static void CreateWorldSnapshot(ref MemoryPackWriter writer, bool withCustomSnapshotData = true, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, ReadOnlySpan<ushort> clusters = default, bool writeEvents = true) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
@@ -282,7 +285,7 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void CreateWorldSnapshot(ref BinaryPackWriter writer, string filePath, bool withCustomSnapshotData = true, bool gzip = false, bool flushToDisk = false, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, ReadOnlySpan<ushort> clusters = default, bool writeEvents = true) {
+            public static void CreateWorldSnapshot(ref MemoryPackWriter writer, string filePath, bool withCustomSnapshotData = true, bool gzip = false, bool flushToDisk = false, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, ReadOnlySpan<ushort> clusters = default, bool writeEvents = true) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
@@ -291,7 +294,7 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void LoadWorldSnapshot(BinaryPackReader reader) {
+            public static void LoadWorldSnapshot(MemoryPackReader reader) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
@@ -304,13 +307,15 @@ namespace FFS.Libraries.StaticEcs {
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
                 if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
+                    var writer = MemoryWriterPool.Rent((uint) (snapshot.Length * 2));
                     writer.WriteGzipData(snapshot);
                     var reader = writer.AsReader();
                     ReadWorld(ref reader);
-                    writer.Dispose();
+                    MemoryWriterPool.Return(writer);
                 } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
+                    var span = new ReadOnlySpan<byte>(snapshot);
+                    var optionalState = MemoryPackReaderOptionalStatePool.Rent(MemoryPackSerializerOptions.Default);
+                    var reader = new MemoryPackReader(span, optionalState);
                     ReadWorld(ref reader);
                 }
             }
@@ -321,39 +326,39 @@ namespace FFS.Libraries.StaticEcs {
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
                 CalculateByteSizeHint(ref byteSizeHint);
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
+                var writer = MemoryWriterPool.Rent(byteSizeHint);
                 writer.WriteFromFile(worldSnapshotFilePath, gzip);
                 var reader = writer.AsReader();
                 ReadWorld(ref reader);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             [MethodImpl(AggressiveInlining)]
             public static byte[] CreateClusterSnapshot(ushort clusterId, bool withCustomSnapshotData = true, bool gzip = false, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, bool withEntitiesData = false) {
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 WriteCluster(ref writer, withCustomSnapshotData, strategy, clusterId, withEntitiesData);
                 var result = writer.CopyToBytes(gzip);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
                 return result;
             }
 
             [MethodImpl(AggressiveInlining)]
             public static void CreateClusterSnapshot(ushort clusterId, ref byte[] result, bool withCustomSnapshotData = true, bool gzip = false, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, bool withEntitiesData = false) {
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 WriteCluster(ref writer, withCustomSnapshotData, strategy, clusterId, withEntitiesData);
                 writer.CopyToBytes(ref result, gzip);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             [MethodImpl(AggressiveInlining)]
             public static void CreateClusterSnapshot(ushort clusterId, string filePath, bool withCustomSnapshotData = true, bool gzip = false, bool flushToDisk = false, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, bool withEntitiesData = false) {
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 CreateClusterSnapshot(clusterId, ref writer, filePath, withCustomSnapshotData, gzip, flushToDisk, strategy, withEntitiesData);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void CreateClusterSnapshot(ushort clusterId, ref BinaryPackWriter writer, bool withCustomSnapshotData = true, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, bool withEntitiesData = false) {
+            public static void CreateClusterSnapshot(ushort clusterId, ref MemoryPackWriter writer, bool withCustomSnapshotData = true, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, bool withEntitiesData = false) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
@@ -361,7 +366,7 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void CreateClusterSnapshot(ushort clusterId, ref BinaryPackWriter writer, string filePath, bool withCustomSnapshotData = true, bool gzip = false, bool flushToDisk = false, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, bool withEntitiesData = false) {
+            public static void CreateClusterSnapshot(ushort clusterId, ref MemoryPackWriter writer, string filePath, bool withCustomSnapshotData = true, bool gzip = false, bool flushToDisk = false, ChunkWritingStrategy strategy = ChunkWritingStrategy.All, bool withEntitiesData = false) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
@@ -370,7 +375,7 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void LoadClusterSnapshot(BinaryPackReader reader, EntitiesAsNewParams entitiesAsNew = default) {
+            public static void LoadClusterSnapshot(MemoryPackReader reader, EntitiesAsNewParams entitiesAsNew = default) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
@@ -383,13 +388,15 @@ namespace FFS.Libraries.StaticEcs {
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
                 if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
+                    var writer = MemoryWriterPool.Rent((uint) (snapshot.Length * 2));
                     writer.WriteGzipData(snapshot);
                     var reader = writer.AsReader();
                     ReadCluster(ref reader, entitiesAsNew);
-                    writer.Dispose();
+                    MemoryWriterPool.Return(writer);
                 } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
+                    var span = new ReadOnlySpan<byte>(snapshot);
+                    var optionalState = MemoryPackReaderOptionalStatePool.Rent(MemoryPackSerializerOptions.Default);
+                    var reader = new MemoryPackReader(span, optionalState);
                     ReadCluster(ref reader, entitiesAsNew);
                 }
             }
@@ -400,39 +407,39 @@ namespace FFS.Libraries.StaticEcs {
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
                 CalculateByteSizeHint(ref byteSizeHint);
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
+                var writer = MemoryWriterPool.Rent(byteSizeHint);
                 writer.WriteFromFile(worldSnapshotFilePath, gzip);
                 var reader = writer.AsReader();
                 ReadCluster(ref reader, entitiesAsNew);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             [MethodImpl(AggressiveInlining)]
             public static byte[] CreateChunkSnapshot(uint chunkIdx, bool withCustomSnapshotData = true, bool gzip = false, bool withEntitiesData = false) {
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 WriteChunk(ref writer, withCustomSnapshotData, chunkIdx, withEntitiesData);
                 var result = writer.CopyToBytes(gzip);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
                 return result;
             }
 
             [MethodImpl(AggressiveInlining)]
             public static void CreateChunkSnapshot(uint chunkIdx, ref byte[] result, bool withCustomSnapshotData = true, bool gzip = false, bool withEntitiesData = false) {
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 WriteChunk(ref writer, withCustomSnapshotData, chunkIdx, withEntitiesData);
                 writer.CopyToBytes(ref result, gzip);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             [MethodImpl(AggressiveInlining)]
             public static void CreateChunkSnapshot(uint chunkIdx, string filePath, bool withCustomSnapshotData = true, bool gzip = false, bool flushToDisk = false, bool withEntitiesData = false) {
-                var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
+                var writer = MemoryWriterPool.Rent(CalculateByteSizeHint());
                 CreateChunkSnapshot(chunkIdx, ref writer, filePath, withCustomSnapshotData, gzip, flushToDisk, withEntitiesData);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void CreateChunkSnapshot(uint chunkIdx, ref BinaryPackWriter writer, bool withCustomSnapshotData = true, bool withEntitiesData = false) {
+            public static void CreateChunkSnapshot(uint chunkIdx, ref MemoryPackWriter writer, bool withCustomSnapshotData = true, bool withEntitiesData = false) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
@@ -440,7 +447,7 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void CreateChunkSnapshot(uint chunkIdx, ref BinaryPackWriter writer, string filePath, bool withCustomSnapshotData = true, bool gzip = false, bool flushToDisk = false, bool withEntitiesData = false) {
+            public static void CreateChunkSnapshot(uint chunkIdx, ref MemoryPackWriter writer, string filePath, bool withCustomSnapshotData = true, bool gzip = false, bool flushToDisk = false, bool withEntitiesData = false) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
@@ -449,7 +456,7 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            public static void LoadChunkSnapshot(BinaryPackReader reader, EntitiesAsNewParams entitiesAsNew = default) {
+            public static void LoadChunkSnapshot(MemoryPackReader reader, EntitiesAsNewParams entitiesAsNew = default) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
@@ -462,13 +469,16 @@ namespace FFS.Libraries.StaticEcs {
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
                 if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
+                    var writer = MemoryWriterPool.Rent((uint) (snapshot.Length * 2));
                     writer.WriteGzipData(snapshot);
                     var reader = writer.AsReader();
                     ReadChunk(ref reader, entitiesAsNew);
-                    writer.Dispose();
-                } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
+                    MemoryWriterPool.Return(writer);
+                } else
+                {
+                    var span = new ReadOnlySpan<byte>(snapshot);
+                    var optionalState = MemoryPackReaderOptionalStatePool.Rent(MemoryPackSerializerOptions.Default);
+                    var reader = new MemoryPackReader(span, optionalState);
                     ReadChunk(ref reader, entitiesAsNew);
                 }
             }
@@ -479,15 +489,15 @@ namespace FFS.Libraries.StaticEcs {
                 AssertWorldIsCreatedOrInitialized(WorldTypeName);
                 #endif
                 CalculateByteSizeHint(ref byteSizeHint);
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
+                var writer = MemoryWriterPool.Rent(byteSizeHint);
                 writer.WriteFromFile(worldSnapshotFilePath, gzip);
                 var reader = writer.AsReader();
                 ReadChunk(ref reader, entitiesAsNew);
-                writer.Dispose();
+                MemoryWriterPool.Return(writer);
             }
 
             [MethodImpl(AggressiveInlining)]
-            private static void WriteWorld(ref BinaryPackWriter writer, bool withCustomSnapshotData, ChunkWritingStrategy strategy, ReadOnlySpan<ushort> clusters, bool writeEvents) {
+            private static void WriteWorld(ref MemoryPackWriter writer, bool withCustomSnapshotData, ChunkWritingStrategy strategy, ReadOnlySpan<ushort> clusters, bool writeEvents) {
                 clusters = HandleClustersRange(clusters);
 
                 var snapshotParams = new SnapshotWriteParams(SnapshotType.World);
@@ -496,8 +506,8 @@ namespace FFS.Libraries.StaticEcs {
                 var tempChunks = TempChunksData.Create();
                 writer.WriteBool(writeEvents);
                 Entities.Value.Write(ref writer, strategy, clusters, ref tempChunks, true);
-                writer.WriteUint(tempChunks.ChunksCount);
-                writer.WriteArrayUnmanaged(tempChunks.Chunks, 0, (int) tempChunks.ChunksCount);
+                writer.WriteVarInt(tempChunks.ChunksCount);
+                writer.WriteUnmanagedArray(tempChunks.Chunks);
                 ModuleComponents.Serializer.Value.WriteWorld(ref writer, tempChunks);
                 ModuleTags.Serializer.Value.WriteWorld(ref writer, tempChunks);
                 if (writeEvents) {
@@ -505,21 +515,20 @@ namespace FFS.Libraries.StaticEcs {
                 }
                 
                 var chunks = new ReadOnlySpan<uint>(tempChunks.Chunks, 0, (int) tempChunks.ChunksCount);
-
                 WriteCustomSnapshotData(ref writer, withCustomSnapshotData, snapshotParams, chunks);
                 AfterWrite(snapshotParams, chunks);
                 tempChunks.Dispose();
             }
 
             [MethodImpl(AggressiveInlining)]
-            private static void ReadWorld(ref BinaryPackReader reader) {
+            private static void ReadWorld(ref MemoryPackReader reader) {
                 var snapshotParams = new SnapshotReadParams(SnapshotType.World, false);
                 BeforeRead(snapshotParams);
 
                 var readEvents = reader.ReadBool();
                 Entities.Value.Read(ref reader, true);
-                var chunksCount = reader.ReadUint();
-                var tempChunks = reader.ReadArrayUnmanagedPooled<uint>(out var h).Array;
+                var chunksCount = reader.ReadVarIntUInt32();
+                var tempChunks = reader.ReadUnmanagedArrayPooled<uint>(out var h).Array;
                 ModuleComponents.Serializer.Value.ReadWorld(ref reader);
                 ModuleTags.Serializer.Value.ReadWorld(ref reader);
                 if (readEvents) {
@@ -535,7 +544,7 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            private static void WriteCluster(ref BinaryPackWriter writer, bool withCustomSnapshotData, ChunkWritingStrategy strategy, ushort clusterId, bool withEntitiesData) {
+            private static void WriteCluster(ref MemoryPackWriter writer, bool withCustomSnapshotData, ChunkWritingStrategy strategy, ushort clusterId, bool withEntitiesData) {
                 var snapshotParams = new SnapshotWriteParams(SnapshotType.Cluster);
                 BeforeWrite(snapshotParams);
                 
@@ -543,14 +552,14 @@ namespace FFS.Libraries.StaticEcs {
                 Entities.Value.FillClusterChunks(strategy, clusterId, ref tempChunks);
                 
                 writer.WriteBool(withEntitiesData);
-                writer.WriteUshort(clusterId);
-                writer.WriteUshort(ModuleComponents.Value.poolsCount);
-                writer.WriteUshort(ModuleTags.Value.poolsCount);
-                writer.WriteUint(tempChunks.ChunksCount);
-                writer.WriteArrayUnmanaged(tempChunks.Chunks, 0, (int) tempChunks.ChunksCount);
+                writer.WriteVarInt(clusterId);
+                writer.WriteVarInt(ModuleComponents.Value.poolsCount);
+                writer.WriteVarInt(ModuleTags.Value.poolsCount);
+                writer.WriteVarInt(tempChunks.ChunksCount);
+                writer.WriteUnmanagedArray(tempChunks.Chunks);
                 for (uint i = 0; i < tempChunks.ChunksCount; i++) {
                     var chunkIdx = tempChunks.Chunks[i];
-                    writer.WriteUint(chunkIdx);
+                    writer.WriteVarInt(chunkIdx);
                     if (withEntitiesData) {
                         Entities.Value.WriteChunk(ref writer, ref Entities.Value.chunks[chunkIdx], false);
                     }
@@ -566,12 +575,12 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            private static void ReadCluster(ref BinaryPackReader reader, EntitiesAsNewParams entitiesAsNewParams) {
+            private static void ReadCluster(ref MemoryPackReader reader, EntitiesAsNewParams entitiesAsNewParams) {
                 var snapshotParams = new SnapshotReadParams(SnapshotType.Cluster, entitiesAsNewParams.EntitiesAsNew);
                 BeforeRead(snapshotParams);
 
                 var withEntitiesData = reader.ReadBool();
-                var clusterId = reader.ReadUshort();
+                var clusterId = reader.ReadVarIntUInt16();
                 
                 if (!withEntitiesData && entitiesAsNewParams.EntitiesAsNew) {
                     throw new StaticEcsException($"World<{typeof(WorldType)}>", "ReadChunk", $"Cluster {clusterId} does not have information about entities, use withEntitiesData = true when saving a cluster");
@@ -587,12 +596,12 @@ namespace FFS.Libraries.StaticEcs {
                     throw new StaticEcsException($"World<{typeof(WorldType)}>", "ReadCluster", $"Cluster {clusterId} is not registered");
                 }
                 
-                var componentsPoolCount = reader.ReadUshort();
-                var tagsPoolCount = reader.ReadUshort();
-                var chunksCount = reader.ReadUint();
-                var tempChunks = reader.ReadArrayUnmanagedPooled<uint>(out var h).Array!;
+                var componentsPoolCount = reader.ReadVarIntUInt16();
+                var tagsPoolCount = reader.ReadVarIntUInt16();
+                var chunksCount = reader.ReadVarIntUInt32();
+                var tempChunks = reader.ReadUnmanagedArrayPooled<uint>(out var h).Array!;
                 for (var i = 0; i < chunksCount; i++) {
-                    var chunkIdx = reader.ReadUint();
+                    var chunkIdx = reader.ReadVarIntUInt32();
                     if (entitiesAsNewParams.EntitiesAsNew) {
                         chunkIdx = FindNextSelfFreeChunk().ChunkIdx;
                         tempChunks[i] = chunkIdx;
@@ -613,7 +622,7 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            private static void WriteChunk(ref BinaryPackWriter writer, bool withCustomSnapshotData, uint chunkIdx, bool withEntitiesData) {
+            private static void WriteChunk(ref MemoryPackWriter writer, bool withCustomSnapshotData, uint chunkIdx, bool withEntitiesData) {
                 if (!Entities.Value.ChunkIsRegistered(chunkIdx)) {
                     throw new StaticEcsException($"World<{typeof(WorldType)}>", "WriteChunk", $"Chunk {chunkIdx} is not registered");
                 }
@@ -621,16 +630,16 @@ namespace FFS.Libraries.StaticEcs {
                 var snapshotParams = new SnapshotWriteParams(SnapshotType.Chunk);
                 BeforeWrite(snapshotParams);
                 
-                writer.WriteUint(chunkIdx);
+                writer.WriteVarInt(chunkIdx);
                 writer.WriteBool(withEntitiesData);
 
                 if (withEntitiesData) {
                     Entities.Value.WriteChunk(ref writer, ref Entities.Value.chunks[chunkIdx], false);
                 }
                 
-                writer.WriteUshort(ModuleComponents.Value.poolsCount);
+                writer.WriteVarInt(ModuleComponents.Value.poolsCount);
                 ModuleComponents.Serializer.Value.WriteChunk(ref writer, chunkIdx);
-                writer.WriteUshort(ModuleTags.Value.poolsCount);
+                writer.WriteVarInt(ModuleTags.Value.poolsCount);
                 ModuleTags.Serializer.Value.WriteChunk(ref writer, chunkIdx);
                 
                 ReadOnlySpan<uint> chunks = stackalloc uint[1] { chunkIdx };
@@ -640,11 +649,11 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            private static void ReadChunk(ref BinaryPackReader reader, EntitiesAsNewParams entitiesAsNewParams) {
+            private static void ReadChunk(ref MemoryPackReader reader, EntitiesAsNewParams entitiesAsNewParams) {
                 var snapshotParams = new SnapshotReadParams(SnapshotType.Chunk, entitiesAsNewParams.EntitiesAsNew);
                 BeforeRead(snapshotParams);
 
-                var chunkIdx = reader.ReadUint();
+                var chunkIdx = reader.ReadVarIntUInt32();
                 var withEntitiesData = reader.ReadBool();
 
                 if (!withEntitiesData && entitiesAsNewParams.EntitiesAsNew) {
@@ -663,9 +672,9 @@ namespace FFS.Libraries.StaticEcs {
                     throw new StaticEcsException($"World<{typeof(WorldType)}>", "ReadChunk", $"Chunk {chunkIdx} is not registered");
                 }
                 
-                var componentsPoolCount = reader.ReadUshort();
+                var componentsPoolCount = reader.ReadVarIntUInt16();
                 ModuleComponents.Serializer.Value.ReadChunk(ref reader, chunkIdx,  componentsPoolCount);
-                var tagsPoolCount = reader.ReadUshort();
+                var tagsPoolCount = reader.ReadVarIntUInt16();
                 ModuleTags.Serializer.Value.ReadChunk(ref reader, chunkIdx, tagsPoolCount);
                 Entities.Value.LoadChunk(chunkIdx);
                 
@@ -690,18 +699,18 @@ namespace FFS.Libraries.StaticEcs {
             }
             
             [MethodImpl(AggressiveInlining)]
-            private static void WriteCustomSnapshotData(ref BinaryPackWriter writer, bool withCustomSnapshotData, SnapshotWriteParams snapshotParams, ReadOnlySpan<uint> chunks) {
+            private static void WriteCustomSnapshotData(ref MemoryPackWriter writer, bool withCustomSnapshotData, SnapshotWriteParams snapshotParams, ReadOnlySpan<uint> chunks) {
                 if (withCustomSnapshotData) {
                     WriteSnapshotData(ref writer, snapshotParams);
                     WriteEntitySnapshotData(ref writer, snapshotParams, chunks);
                 } else {
-                    writer.WriteInt(0);
-                    writer.WriteInt(0);
+                    writer.WriteVarInt(0);
+                    writer.WriteVarInt(0);
                 }
             }
             
             [MethodImpl(AggressiveInlining)]
-            private static void ReadCustomSnapshotData(ref BinaryPackReader reader, SnapshotReadParams snapshotParams, ReadOnlySpan<uint> chunks) {
+            private static void ReadCustomSnapshotData(ref MemoryPackReader reader, SnapshotReadParams snapshotParams, ReadOnlySpan<uint> chunks) {
                 ReadSnapshotData(ref reader, snapshotParams);
                 ReadEntitySnapshotData(ref reader, snapshotParams, chunks);
             }

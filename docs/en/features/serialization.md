@@ -16,7 +16,8 @@ Let's define a few components:
 
 ```csharp
 using FFS.Libraries.StaticEcs;
-using FFS.Libraries.StaticPack;
+using MemoryPack;
+using MemoryPackWriter = MemoryPack.MemoryPackWriter<System.Buffers.ArrayBufferWriter<byte>>;
 
 // Сomponent with reference data
 public struct Name : IComponent {
@@ -29,9 +30,9 @@ public struct Name : IComponent {
     public class Config<WorldType> : DefaultComponentConfig<Name, WorldType> where WorldType : struct, IWorldType {
         public override Guid Id() => new("531dc870-fdf5-4a8d-a4c6-b4911b1ea1c3");
 
-        public override BinaryWriter<Name> Writer() => (ref BinaryPackWriter writer, in Name value) => writer.WriteString16(value.Value);
+        public override BinaryWriter<Name> Writer() => (ref MemoryPackWriter writer, in Name value) => writer.WriteString16(value.Value);
 
-        public override BinaryReader<Name> Reader() => (ref BinaryPackReader reader) => new Name(reader.ReadString16());
+        public override BinaryReader<Name> Reader() => (ref MemoryPackReader reader) => new Name(reader.ReadString16());
     }
 }
 
@@ -49,14 +50,14 @@ public struct Position : IComponent {
         public override Guid Id() => new("b121594c-456e-4712-9b64-b75dbb37e611");
 
         public override BinaryWriter<Position> Writer() {
-            return (ref BinaryPackWriter w, in Position value) => {
+            return (ref MemoryPackWriter w, in Position value) => {
                 w.WriteFloat(value.X);
                 w.WriteFloat(value.Y);
                 w.WriteFloat(value.Z);
             };
         }
 
-        public override BinaryReader<Position> Reader() => (ref BinaryPackReader r) => 
+        public override BinaryReader<Position> Reader() => (ref MemoryPackReader r) => 
             new Position(r.ReadFloat(), r.ReadFloat(), r.ReadFloat());
 
         public override IPackArrayStrategy<Position> ReadWriteStrategy() => new UnmanagedPackArrayStrategy<Position>();
@@ -74,9 +75,9 @@ public struct Items : IMultiComponent<Items, int> {
     public class Config<WorldType> : DefaultComponentConfig<Items, WorldType> where WorldType : struct, IWorldType {
         public override Guid Id() => new("c54de753-ff4e-4620-b2ce-6de5c4870db0");
 
-        public override BinaryWriter<Items> Writer() => (ref BinaryPackWriter writer, in Items value) => writer.WriteMulti(value.Values);
+        public override BinaryWriter<Items> Writer() => (ref MemoryPackWriter writer, in Items value) => writer.WriteMulti(value.Values);
 
-        public override BinaryReader<Items> Reader() => (ref BinaryPackReader reader) => new Items {
+        public override BinaryReader<Items> Reader() => (ref MemoryPackReader reader) => new Items {
             Values = reader.ReadMulti<WorldType, int>()
         };
     }
@@ -94,10 +95,10 @@ public struct Parent : IEntityLinkComponent<Parent> {
         where WorldType : struct, IWorldType {
         public override Guid Id() => new("90a9bb9a-6b86-4041-9a39-2682d5801881");
 
-        public override BinaryWriter<Parent> Writer() => (ref BinaryPackWriter writer, in Parent value) => writer.Write(value.Link);
+        public override BinaryWriter<Parent> Writer() => (ref MemoryPackWriter writer, in Parent value) => writer.Write(value.Link);
 
-        public override BinaryReader<Parent> Reader() => (ref BinaryPackReader reader) => new Parent {
-            Link = reader.Read<EntityGID>()
+        public override BinaryReader<Parent> Reader() => (ref MemoryPackReader reader) => new Parent {
+            Link = reader.ReadValue<EntityGID>()
         };
     }
 }
@@ -114,9 +115,9 @@ public struct Childs: IEntityLinksComponent<Childs> {
         where WorldType : struct, IWorldType {
         public override Guid Id() => new("15c875b7-c35f-4e25-a040-e71c8b25103e");
 
-        public override BinaryWriter<Childs> Writer() => (ref BinaryPackWriter writer, in Childs value) => writer.WriteROMulti(value.Links);
+        public override BinaryWriter<Childs> Writer() => (ref MemoryPackWriter writer, in Childs value) => writer.WriteROMulti(value.Links);
 
-        public override BinaryReader<Childs> Reader() => (ref BinaryPackReader reader) => new Childs {
+        public override BinaryReader<Childs> Reader() => (ref MemoryPackReader reader) => new Childs {
             Links = reader.ReadROMulti<WorldType, EntityGID>()
         };
     }
@@ -530,13 +531,13 @@ public struct Position : IComponent {
         public override Guid Id() => new("b121594c-456e-4712-9b64-b75dbb37e611");
 
         public override BinaryWriter<Position> Writer() {
-            return (ref BinaryPackWriter w, in Position value) => {
+            return (ref MemoryPackWriter w, in Position value) => {
                 w.WriteFloat(value.X);
                 w.WriteFloat(value.Y);
             };
         }
 
-        public override BinaryReader<Position> Reader() => (ref BinaryPackReader r) => 
+        public override BinaryReader<Position> Reader() => (ref MemoryPackReader r) => 
             new Position(r.ReadFloat(), r.ReadFloat());
     }
 }
@@ -549,14 +550,14 @@ public struct Position : IComponent {
         public override Guid Id() => new("b121594c-456e-4712-9b64-b75dbb37e611");
 
         public override BinaryWriter<Position> Writer() {
-            return (ref BinaryPackWriter w, in Position value) => {
+            return (ref MemoryPackWriter w, in Position value) => {
                 w.WriteFloat(value.X);
                 w.WriteFloat(value.Y);
                 w.WriteFloat(value.Z); // Actualizing the writer for Z
             };
         }
 
-        public override BinaryReader<Position> Reader() => (ref BinaryPackReader r) => 
+        public override BinaryReader<Position> Reader() => (ref MemoryPackReader r) => 
             new Position(r.ReadFloat(), r.ReadFloat(), r.ReadFloat()); // Actualizing the reader for Z
 
         // Change the version to the following (default version is 0)
@@ -564,7 +565,7 @@ public struct Position : IComponent {
 
         // Write a migration where for version 0 (old) we read only X and Y and set Z to 0
         public override EcsComponentMigrationReader<Position, WorldType> MigrationReader() {
-            return (ref BinaryPackReader reader, World<WorldType>.Entity entity, byte version, bool disabled) => {
+            return (ref MemoryPackReader reader, World<WorldType>.Entity entity, byte version, bool disabled) => {
                 if (version == 0) {
                     return new Position(reader.ReadFloat(), reader.ReadFloat(), 0);
                 }
@@ -587,7 +588,7 @@ public struct Position : IComponent {
 // Example for components
 W.Serializer.SetComponentDeleteMigrator(
     new("3a6fe6a2-9427-43ae-9b4a-f8582e3a5f90"),
-    (ref BinaryPackReader reader, World<WT>.Entity entity, byte version, bool disabled) => {
+    (ref MemoryPackReader reader, World<WT>.Entity entity, byte version, bool disabled) => {
         // Here you need to read ALL the data correctly and execute the custom logic
     }
 );
@@ -603,7 +604,7 @@ W.Serializer.SetTagDeleteMigrator(
 // Example for events
 W.Serializer.SetEventDeleteMigrator(
     new("3a6fe6a2-9427-43ae-9b4a-f8582e3a5f90"),
-    (ref BinaryPackReader reader, byte version) => {
+    (ref MemoryPackReader reader, byte version) => {
         // Here you need to read ALL the data correctly and execute the custom logic
     });
 ```
@@ -726,11 +727,11 @@ W.Serializer.LoadEntitiesSnapshot(snapshot, entitiesAsNew: true, onLoad: entity 
 W.Serializer.SetSnapshotHandler(
     new ("57c15483-988a-47e7-919c-51b9a7b957b5"), // Unique data type guid
     version: 0,                                   // Version
-    (ref BinaryPackWriter writer, SnapshotWriteParams param) => {            // ПCustom Data Writer
+    (ref MemoryPackWriter writer, SnapshotWriteParams param) => {            // ПCustom Data Writer
         writer.WriteDateTime(DateTime.Now);
         Console.WriteLine("Saved current time");
     },
-    (ref BinaryPackReader reader, ushort version, SnapshotReadParams param) => { // Custom Data Reader
+    (ref MemoryPackReader reader, ushort version, SnapshotReadParams param) => { // Custom Data Reader
         var time = reader.ReadDateTime();
         Console.WriteLine($"Save dateTime is {time}");
     }
@@ -750,10 +751,10 @@ W.Serializer.SetSnapshotHandler(
 W.Serializer.SetSnapshotHandlerEachEntity(
     new ("57c15483-988a-47e7-919c-51b9a7b957b5"), // Unique data type guid
     version: 0,                                   // Version
-    (ref BinaryPackWriter writer, W.Entity entity, SnapshotWriteParams param) => {
+    (ref MemoryPackWriter writer, W.Entity entity, SnapshotWriteParams param) => {
         // Write custom entity data
     },
-    (ref BinaryPackReader reader, W.Entity entity, ushort version, SnapshotReadParams param) => {
+    (ref MemoryPackReader reader, W.Entity entity, ushort version, SnapshotReadParams param) => {
         // Read custom entity data
     }
 );
