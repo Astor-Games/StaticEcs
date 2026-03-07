@@ -40,6 +40,18 @@ namespace FFS.Libraries.StaticEcs {
         public bool TryGetPool(Type eventType, out IEventPoolWrapper pool) {
             return World<WorldType>.Events.TryGetPool(eventType, out pool);
         }
+        
+        [MethodImpl(AggressiveInlining)]
+        public static ushort GetEventId<T>() where T : struct, IEvent
+        {
+            return World<WorldType>.Events.GetEventId<T>();
+        }
+        
+        [MethodImpl(AggressiveInlining)]
+        public static Type GetEventType(ushort id)
+        {
+            return World<WorldType>.Events.GetEventType(id);
+        }
     }
 
     #if ENABLE_IL2CPP
@@ -167,6 +179,27 @@ namespace FFS.Libraries.StaticEcs {
 
                 Serializer.Value.RegisterEventType(config);
             }
+
+            [MethodImpl(AggressiveInlining)]
+            public static ushort GetEventId<T>() where T : struct, IEvent
+            {
+                var eventType = typeof(T);
+                #if FFS_ECS_DEBUG
+                if (!IsWorldInitialized()) throw new StaticEcsException($"Events<{typeof(WorldType)}>, Method: GetEventId, World not initialized");
+                if (!_poolIdxByType.ContainsKey(eventType)) throw new StaticEcsException($"Events<{typeof(WorldType)}>, Method: GetEventId, Event type {eventType} not registered");
+                #endif
+                return (ushort)_poolIdxByType[eventType];
+            }
+            
+            [MethodImpl(AggressiveInlining)]
+            public static Type GetEventType(ushort id)
+            {
+                #if FFS_ECS_DEBUG
+                if (!IsWorldInitialized()) throw new StaticEcsException($"Events<{typeof(WorldType)}>, Method: GetEventType, World not initialized");
+                #endif
+                return _pools[id].GetEventType();
+            }
+            
             #endregion
 
             #region INTERNAL

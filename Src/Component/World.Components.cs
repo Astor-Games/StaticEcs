@@ -94,6 +94,21 @@ namespace FFS.Libraries.StaticEcs {
             return ModuleComponents.Value.TryGetPool(out pool);
         }
         
+        [MethodImpl(AggressiveInlining)]
+        public static ushort GetComponentId<T>() where T : IComponent
+        {
+            return ModuleComponents.Value.GetComponentId<T>();
+        }
+        
+        [MethodImpl(AggressiveInlining)]
+        public static Type GetComponentType(ushort id)
+        {
+            #if FFS_ECS_DEBUG
+            if (!IsWorldInitialized()) throw new StaticEcsException($"Events<{typeof(WorldType)}>, Method: GetEventType, World not initialized");
+            #endif
+            return ModuleComponents.Value.GetComponentType(id);
+        }
+        
         #if FFS_ECS_EVENTS
         public partial struct DEBUG {
             [MethodImpl(AggressiveInlining)]
@@ -215,6 +230,26 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 pool = default;
                 return Components<T>.Value.IsRegistered();
+            }
+            
+            [MethodImpl(AggressiveInlining)]
+            public ushort GetComponentId<T>() where T : IComponent
+            {
+                var componentType = typeof(T);
+                #if FFS_ECS_DEBUG
+                AssertWorldIsInitialized(WorldTypeName);
+                Assert(WorldTypeName, _poolByType.ContainsKey(componentType), $"Component type {componentType} not registered");
+                #endif
+                return _poolByType[componentType].DynamicId();
+            }
+            
+            [MethodImpl(AggressiveInlining)]
+            public Type GetComponentType(ushort id)
+            {
+                #if FFS_ECS_DEBUG
+                AssertWorldIsInitialized(WorldTypeName);
+                #endif
+                return _pools[id].GetElementType();
             }
 
             [MethodImpl(AggressiveInlining)]
