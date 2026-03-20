@@ -783,6 +783,11 @@ namespace FFS.Libraries.StaticEcs {
             public bool RawHasAllOf(Type componentType) {
                 return ModuleComponents.Value.GetPool(componentType).Has(this);
             }
+            
+            [MethodImpl(AggressiveInlining)]
+            public bool RawHasDisabled(Type componentType) {
+                return ModuleComponents.Value.GetPool(componentType).HasDisabled(this);
+            }
 
             [MethodImpl(AggressiveInlining)]
             public void RawAdd(Type componentType) {
@@ -897,6 +902,7 @@ namespace FFS.Libraries.StaticEcs {
         public bool TryDelete<C>() where C : struct, IComponent => _entity.TryDelete<C>();
         public void Delete<C>() where C : struct, IComponent => _entity.Delete<C>();
         public bool HasAllOf(Type componentType) => _entity.RawHasAllOf(componentType);
+        public bool HasDisabled(Type componentType) => _entity.RawHasDisabled(componentType);
         public void Add(Type componentType) => _entity.RawAdd(componentType);
         public IComponent GetRaw(Type componentType) => _entity.RawGet(componentType);
         public void PutRaw(IComponent component) => _entity.RawPut(component);
