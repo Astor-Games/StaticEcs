@@ -30,7 +30,6 @@
         <DebugSymbols>true</DebugSymbols>
         <DebugType>portable</DebugType>
         <Optimize>false</Optimize>
-        <OutputPath>bin\Debug\</OutputPath>
         <DefineConstants>FFS_ECS_ENABLE_DEBUG</DefineConstants>
         <WarningLevel>4</WarningLevel>
         <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -42,7 +41,6 @@
         <PlatformTarget>AnyCPU</PlatformTarget>
         <DebugType>portable</DebugType>
         <Optimize>true</Optimize>
-        <OutputPath>bin\Release\</OutputPath>
         <WarningLevel>4</WarningLevel>
         <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
