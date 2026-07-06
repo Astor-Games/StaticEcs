@@ -1037,7 +1037,7 @@ namespace FFS.Libraries.StaticEcs {
             /// entity deletion when clearing the existing world before loading.
             /// Default is <c>false</c>.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void LoadWorldSnapshot(BinaryPackReader reader, bool hardReset = false) {
+            public static void LoadWorldSnapshot(ref BinaryPackReader reader, bool hardReset = false) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
