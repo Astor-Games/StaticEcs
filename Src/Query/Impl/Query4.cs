@@ -4392,7 +4392,7 @@ namespace FFS.Libraries.StaticEcs {
                                             var trackSegmentBlockIdx = (byte)((origChunkBlockEntityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_SEGMENT_MASK);
                                             var trackChunkBlockIdx = (byte)((origChunkBlockEntityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_CHUNK_MASK);
                                             var trackChunkIdx = origChunkBlockEntityId >> Const.ENTITIES_IN_CHUNK_SHIFT;
-                                            tracker.ApplyBlock(segmentIdx >> Const.BLOCKS_IN_SEGMENT_SHIFT, trackSegmentBlockIdx, entitiesMask, trackChunkBlockIdx, trackChunkIdx);
+                                            tracker.ApplyBlock(segmentIdx, trackSegmentBlockIdx, entitiesMask, trackChunkBlockIdx, trackChunkIdx);
                                         }
                                         #endif
                                     }
@@ -4974,7 +4974,7 @@ namespace FFS.Libraries.StaticEcs {
                             var trackSegmentBlockIdx = (byte)((origChunkBlockEntityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_SEGMENT_MASK);
                             var trackChunkBlockIdx = (byte)((origChunkBlockEntityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_CHUNK_MASK);
                             var trackChunkIdx = origChunkBlockEntityId >> Const.ENTITIES_IN_CHUNK_SHIFT;
-                            tracker.ApplyBlock(segmentIdx >> Const.BLOCKS_IN_SEGMENT_SHIFT, trackSegmentBlockIdx, entitiesMask, trackChunkBlockIdx, trackChunkIdx);
+                            tracker.ApplyBlock(segmentIdx, trackSegmentBlockIdx, entitiesMask, trackChunkBlockIdx, trackChunkIdx);
                         }
                         #endif
                     }

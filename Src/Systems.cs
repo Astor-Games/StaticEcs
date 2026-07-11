@@ -66,28 +66,29 @@ namespace FFS.Libraries.StaticEcs {
         public void Destroy() { }
 
         /// <summary>
-        /// Stable identifier used to match this system instance against a <c>WorldSnapshot</c> entry
-        /// at load time. Returning a non-empty <see cref="System.Guid"/> opts the system into automatic
-        /// serialisation. Default returns <c>null</c> — the system is excluded from snapshots.
+        /// Stable identifier used to match this system instance against a snapshot entry at load time,
+        /// both for its tracking tick and for its serialised state. Default returns <c>null</c> — the
+        /// identifier is derived automatically from the system type name. Override it to keep the identity
+        /// stable across type renames, or to give distinct identities to several instances of the same type.
         /// </summary>
         public Guid? Guid() => null;
 
         /// <summary>
         /// Schema version stored alongside serialised system state. When the saved version differs
-        /// from the current one, <see cref="Read"/> is called for migration instead of bulk byte-copy.
+        /// from the current one, <see cref="Read"/> receives the saved version and can migrate the data.
         /// </summary>
         public byte Version() => 0;
 
         /// <summary>
-        /// Custom serialisation hook. Required only when <see cref="Guid"/> is set and the system type
-        /// is not unmanaged (e.g. it is a class or contains references). For unmanaged struct systems
-        /// the framework copies raw memory and skips this hook unless the version changes.
+        /// Serialisation hook. Overriding both <see cref="Write"/> and <see cref="Read"/> opts the system
+        /// into snapshot serialisation of its own state; overriding neither leaves the system out of it.
         /// </summary>
         public void Write(ref BinaryPackWriter writer) {}
 
         /// <summary>
-        /// Custom deserialisation hook. Required only when <see cref="Guid"/> is set and the system type
-        /// is not unmanaged. Also invoked on version mismatch for unmanaged types.
+        /// Deserialisation hook, receiving the <see cref="Version"/> value stored with the data.
+        /// Overriding both <see cref="Write"/> and <see cref="Read"/> opts the system into snapshot
+        /// serialisation of its own state; overriding neither leaves the system out of it.
         /// </summary>
         public void Read(ref BinaryPackReader reader, byte version) {}
     }
@@ -106,13 +107,15 @@ namespace FFS.Libraries.StaticEcs {
 
     internal struct SystemData {
         public ISystem System;
+        public Guid Guid;
+        public ulong LastTick;
         public int Index;
         public short Order;
         public bool HasUpdate;
         public bool HasInit;
         public bool HasDestroy;
         public bool HasUpdateIsActive;
-        public Guid? Guid;
+        public bool HasSnapshotState;
         public byte Version;
         #if FFS_ECS_DEBUG
         public float AvgUpdateTime;
@@ -149,11 +152,9 @@ namespace FFS.Libraries.StaticEcs {
             public static SystemsHandle Handle;
             
             #if FFS_ECS_DEBUG
-            internal static int[] UpdateSystemsAllIndex;
             internal static Stopwatch Stopwatch;
             #endif
-            internal static ISystem[] UpdateSystems;
-            internal static ulong[] UpdateSystemLastTicks;
+            internal static int[] UpdateSystemsIndex;
             internal static SystemData[] AllSystems;
             internal static int AllSystemsCount;
             internal static uint UpdateSystemsCount;
@@ -184,13 +185,11 @@ namespace FFS.Libraries.StaticEcs {
                 }
                 #endif
                 baseSize = Math.Max(baseSize, 4);
-                UpdateSystems = new ISystem[baseSize];
-                UpdateSystemLastTicks = new ulong[baseSize];
+                UpdateSystemsIndex = new int[baseSize];
                 AllSystems = new SystemData[baseSize];
                 AllSystemsCount = default;
                 UpdateSystemsCount = default;
                 #if FFS_ECS_DEBUG
-                UpdateSystemsAllIndex = new int[baseSize];
                 Stopwatch = new Stopwatch();
                 #endif
                 Status = SystemsStatus.Created;
@@ -228,18 +227,13 @@ namespace FFS.Libraries.StaticEcs {
                     }
 
                     if (systemData.HasUpdate) {
-                        if (UpdateSystemsCount == UpdateSystems.Length) {
-                            Array.Resize(ref UpdateSystems, (int)(UpdateSystemsCount << 1));
-                            Array.Resize(ref UpdateSystemLastTicks, (int)(UpdateSystemsCount << 1));
-                            #if FFS_ECS_DEBUG
-                            Array.Resize(ref UpdateSystemsAllIndex, (int)(UpdateSystemsCount << 1));
-                            #endif
+                        if (UpdateSystemsCount == UpdateSystemsIndex.Length) {
+                            Array.Resize(ref UpdateSystemsIndex, (int)(UpdateSystemsCount << 1));
                         }
-                        UpdateSystems[UpdateSystemsCount] = systemData.System;
-                        UpdateSystemLastTicks[UpdateSystemsCount] = Data.Instance.CurrentTick;
-                        #if FFS_ECS_DEBUG
-                        UpdateSystemsAllIndex[UpdateSystemsCount] = i;
-                        #endif
+                        if (systemData.LastTick == 0) {
+                            AllSystems[i].LastTick = Data.Instance.CurrentTick;
+                        }
+                        UpdateSystemsIndex[UpdateSystemsCount] = i;
                         UpdateSystemsCount++;
                     }
                 }
@@ -265,26 +259,26 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 ref var currentLastTick = ref Data.Instance.CurrentLastTick;
                 for (var i = 0; i < UpdateSystemsCount; i++) {
-                    var system = UpdateSystems[i];
+                    ref var systemData = ref AllSystems[UpdateSystemsIndex[i]];
                     #if FFS_ECS_DEBUG
-                    if (AllSystems[UpdateSystemsAllIndex[i]].DebugDisabled) continue;
+                    if (systemData.DebugDisabled) continue;
                     #endif
-                    if (system.UpdateIsActive()) {
-                        currentLastTick = UpdateSystemLastTicks[i];
+                    currentLastTick = systemData.LastTick;
+                    if (systemData.System.UpdateIsActive()) {
                         #if FFS_ECS_DEBUG
                         Stopwatch.Restart();
                         #endif
-                        system.Update();
+                        systemData.System.Update();
+                        systemData.LastTick = Data.Instance.CurrentTick;
                         #if FFS_ECS_DEBUG
                         Stopwatch.Stop();
-                        ref var time = ref AllSystems[UpdateSystemsAllIndex[i]].AvgUpdateTime;
+                        ref var time = ref systemData.AvgUpdateTime;
                         var elapsed = (float)Stopwatch.ElapsedTicks / Stopwatch.Frequency * 1000;
                         time = time == 0f ? elapsed : (elapsed + time) * 0.5f;
                         #endif
-                        UpdateSystemLastTicks[i] = Data.Instance.CurrentTick;
-                        currentLastTick = 0;
                     }
                 }
+                currentLastTick = 0;
             }
 
             /// <summary>
@@ -318,12 +312,10 @@ namespace FFS.Libraries.StaticEcs {
                 Handle = default;
 
                 #if FFS_ECS_DEBUG
-                UpdateSystemsAllIndex = default;
                 Stopwatch = default;
                 #endif
 
-                UpdateSystems = default;
-                UpdateSystemLastTicks = default;
+                UpdateSystemsIndex = default;
                 AllSystems = default;
                 AllSystemsCount = default;
                 UpdateSystemsCount = default;
@@ -338,32 +330,56 @@ namespace FFS.Libraries.StaticEcs {
                 Guid = default;
             }
 
+            /// <summary>
+            /// Resets the tracking tick of every registered system to <paramref name="tick"/>.
+            /// Called on world snapshot load right after the world tick is restored, so that systems
+            /// missing from the snapshot start from the restored tick instead of a stale one.
+            /// </summary>
+            internal static void ResetLastTicks(ulong tick) {
+                if (Status == SystemsStatus.NotCreated) return;
+
+                for (var i = 0; i < AllSystemsCount; i++) {
+                    AllSystems[i].LastTick = tick;
+                }
+            }
+
             internal static void WriteSnapshot(ref BinaryPackWriter writer) {
                 ResourcesData<TSystemsType>.Instance.WriteSnapshot(ref writer);
 
-                var countPos = writer.MakePoint(sizeof(ushort));
-                ushort serializableCount = 0;
+                writer.WriteUshort((ushort) AllSystemsCount);
                 for (var i = 0; i < AllSystemsCount; i++) {
                     ref var data = ref AllSystems[i];
-                    if (data.Guid == null) continue;
-                    writer.WriteGuid(data.Guid.Value);
-                    writer.WriteByte(data.Version);
-                    var sizePos = writer.MakePoint(sizeof(uint));
-                    data.System.Write(ref writer);
-                    writer.WriteUintAt(sizePos, writer.Position - (sizePos + sizeof(uint)));
-                    serializableCount++;
+                    writer.WriteGuid(data.Guid);
+                    writer.WriteUlong(data.LastTick);
+                    writer.WriteBool(data.HasSnapshotState);
+                    if (data.HasSnapshotState) {
+                        writer.WriteByte(data.Version);
+                        var sizePos = writer.MakePoint(sizeof(uint));
+                        data.System.Write(ref writer);
+                        writer.WriteUintAt(sizePos, writer.Position - (sizePos + sizeof(uint)));
+                    }
                 }
-                writer.WriteUshortAt(countPos, serializableCount);
             }
 
             internal static void ReadSnapshot(ref BinaryPackReader reader) {
                 ResourcesData<TSystemsType>.Instance.ReadSnapshot(ref reader);
 
+                var currentTick = Data.Instance.CurrentTick;
+                var oldestTrackedTick = currentTick > Data.Instance.TrackingBufferSize
+                    ? currentTick - Data.Instance.TrackingBufferSize
+                    : 0UL;
+
                 var systemCount = reader.ReadUshort();
                 for (var i = 0; i < systemCount; i++) {
                     var guid = reader.ReadGuid();
-                    var version = reader.ReadByte();
-                    var size = reader.ReadUint();
+                    var lastTick = reader.ReadUlong();
+                    var hasSnapshotState = reader.ReadBool();
+
+                    if (lastTick > currentTick) {
+                        lastTick = currentTick;
+                    } else if (lastTick < oldestTrackedTick) {
+                        lastTick = oldestTrackedTick;
+                    }
 
                     var found = -1;
                     for (var j = 0; j < AllSystemsCount; j++) {
@@ -374,6 +390,14 @@ namespace FFS.Libraries.StaticEcs {
                     }
 
                     if (found >= 0) {
+                        AllSystems[found].LastTick = lastTick;
+                    }
+
+                    if (!hasSnapshotState) continue;
+
+                    var version = reader.ReadByte();
+                    var size = reader.ReadUint();
+                    if (found >= 0 && AllSystems[found].HasSnapshotState) {
                         var endPos = reader.Position + size;
                         AllSystems[found].System.Read(ref reader, version);
                         reader.Position = endPos;
@@ -412,6 +436,28 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 ISystem boxedSystem = system;
+                var declaredGuid = boxedSystem.Guid();
+                var guid = declaredGuid != null && declaredGuid.Value != Guid.Empty
+                    ? declaredGuid.Value
+                    : boxedSystem.GetType().GuidFromAQN();
+
+                var hasWrite = SystemType<TSystem>.HasWrite();
+                var hasRead = SystemType<TSystem>.HasRead();
+                #if FFS_ECS_DEBUG
+                if (hasWrite != hasRead) {
+                    throw new StaticEcsException(
+                        $"Systems<{typeof(TSystemsType)}>: system `{typeof(TSystem)}` overrides only one of Write / Read. " +
+                        $"Override both methods to enable snapshot serialization, or neither to opt out of it.");
+                }
+                for (var k = 0; k < AllSystemsCount; k++) {
+                    if (AllSystems[k].Guid == guid) {
+                        throw new StaticEcsException(
+                            $"Systems<{typeof(TSystemsType)}>: duplicate system Guid {guid} (types `{AllSystems[k].System.GetType()}` and `{typeof(TSystem)}`). " +
+                            $"Systems of the same type registered more than once must override Guid() with distinct values.");
+                    }
+                }
+                #endif
+
                 var data = new SystemData {
                     Order = order,
                     System = boxedSystem,
@@ -419,26 +465,11 @@ namespace FFS.Libraries.StaticEcs {
                     HasDestroy = SystemType<TSystem>.HasDestroy(),
                     HasInit = SystemType<TSystem>.HasInit(),
                     HasUpdate = SystemType<TSystem>.HasUpdate(),
-                    HasUpdateIsActive = SystemType<TSystem>.HasUpdateIsActive()
+                    HasUpdateIsActive = SystemType<TSystem>.HasUpdateIsActive(),
+                    HasSnapshotState = hasWrite && hasRead,
+                    Guid = guid,
+                    Version = boxedSystem.Version()
                 };
-
-                var guid = boxedSystem.Guid();
-                if (guid != null && guid.Value != Guid.Empty) {
-                    #if FFS_ECS_DEBUG
-                    if (!SystemType<TSystem>.HasWrite() || !SystemType<TSystem>.HasRead()) {
-                        throw new StaticEcsException(
-                            $"Systems<{typeof(TSystemsType)}>: system `{typeof(TSystem)}` declares Guid but does not implement both Write and Read. " +
-                            $"Override both methods to enable snapshot serialization.");
-                    }
-                    for (var k = 0; k < AllSystemsCount; k++) {
-                        if (AllSystems[k].Guid == guid) {
-                            throw new StaticEcsException($"Systems<{typeof(TSystemsType)}>: duplicate system Guid {guid.Value} (types `{AllSystems[k].System.GetType()}` and `{typeof(TSystem)}`)");
-                        }
-                    }
-                    #endif
-                    data.Guid = guid.Value;
-                    data.Version = boxedSystem.Version();
-                }
 
                 AllSystems[AllSystemsCount] = data;
                 AllSystemsCount++;
@@ -705,6 +736,8 @@ namespace FFS.Libraries.StaticEcs {
         private static readonly Type[] WriteParams = { typeof(BinaryPackWriter).MakeByRefType() };
         private static readonly Type[] ReadParams = { typeof(BinaryPackReader).MakeByRefType(), typeof(byte) };
 
+        internal static readonly Guid TypeGuid = typeof(T).GuidFromAQN();
+
         internal static bool HasUpdate() {
             return HasMethod(typeof(T), nameof(ISystem.Update), Array.Empty<Type>());
         }
@@ -778,6 +811,7 @@ namespace FFS.Libraries.StaticEcs {
         private readonly unsafe delegate*<IReadOnlyCollection<Type>> _getAllResourcesTypes;
         private readonly unsafe delegate*<ref BinaryPackWriter, void> _writeSnapshot;
         private readonly unsafe delegate*<ref BinaryPackReader, void> _readSnapshot;
+        private readonly unsafe delegate*<ulong, void> _resetLastTicks;
         private readonly unsafe delegate*<Span<SystemData>> _getAllSystems;
 
         /// <summary>The <see cref="Type"/> of the <c>TWorld</c> struct that owns this systems pipeline.</summary>
@@ -813,6 +847,7 @@ namespace FFS.Libraries.StaticEcs {
                 &World<TWorld>.Systems<TSystemsType>._GetAllResourcesTypes,
                 &World<TWorld>.Systems<TSystemsType>.WriteSnapshot,
                 &World<TWorld>.Systems<TSystemsType>.ReadSnapshot,
+                &World<TWorld>.Systems<TSystemsType>.ResetLastTicks,
                 &World<TWorld>.Systems<TSystemsType>._GetAllSystems
             );
         }
@@ -834,6 +869,7 @@ namespace FFS.Libraries.StaticEcs {
             delegate*<IReadOnlyCollection<Type>> getAllResourcesTypes,
             delegate*<ref BinaryPackWriter, void> writeSnapshot,
             delegate*<ref BinaryPackReader, void> readSnapshot,
+            delegate*<ulong, void> resetLastTicks,
             delegate*<Span<SystemData>> getAllSystems) {
             WorldType = worldType;
             SystemsType = systemsType;
@@ -851,6 +887,7 @@ namespace FFS.Libraries.StaticEcs {
             _getAllResourcesTypes = getAllResourcesTypes;
             _writeSnapshot = writeSnapshot;
             _readSnapshot = readSnapshot;
+            _resetLastTicks = resetLastTicks;
             _getAllSystems = getAllSystems;
         }
 
@@ -862,6 +899,11 @@ namespace FFS.Libraries.StaticEcs {
         [MethodImpl(AggressiveInlining)]
         internal void ReadSnapshot(ref BinaryPackReader reader) {
             unsafe { _readSnapshot(ref reader); }
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        internal void ResetLastTicks(ulong tick) {
+            unsafe { _resetLastTicks(tick); }
         }
 
         [MethodImpl(AggressiveInlining)]

@@ -782,7 +782,7 @@ ___
 
 ## 系统序列化
 
-`ISystem` 拥有与 `IResource` 相同的四个可选方法。重写 `Guid()` 以使系统加入快照序列化。
+`ISystem` 拥有与 `IResource` 相同的四个可选方法。同时重写 `Write` 和 `Read` 即可让系统自身的状态加入快照序列化。
 
 ```csharp
 public interface ISystem {
@@ -798,11 +798,12 @@ public interface ISystem {
 }
 ```
 
+每个系统只有一个标识符。`Guid()` 返回 `null`（默认）表示标识符由系统类型名（`assembly-qualified name`）自动派生；重写 `Guid()` 可显式固定它。快照条目——系统的追踪 tick 及其序列化状态——都通过该标识符与已注册的系统匹配。
+
 #### 验证规则（在 `Add<TSystem>` 时检查）
 
-- 没有 `Guid` 的系统会被静默排除在快照之外。
-- 任何声明 `Guid` 的系统**必须**重写 `Write` 和 `Read` — 与布局无关。unmanaged 快速路径不适用：系统实例以装箱形式存储在 `SystemData.System` 中，框架始终调用钩子。缺少它们会从 `Add` 抛出 `StaticEcsException`。
-- 同一 `Systems<TSystemsType>` 组内的重复 `Guid` 在 DEBUG 模式下断言。
+- 同时重写 `Write` 和 `Read` 会启用系统自身状态的序列化；两者都不重写则该系统不参与这部分快照。只重写其中之一会从 `Add` 抛出 `StaticEcsException`。
+- 同一 `Systems<TSystemsType>` 组内的重复标识符在 DEBUG 模式下断言。因此注册同一系统类型的多个实例时，必须为每个实例重写 `Guid()` 并给出不同的值。
 
 #### 示例
 
@@ -851,7 +852,26 @@ W.Serializer.LoadSystemsSnapshot(snapshot);
 W.Serializer.LoadSystemsSnapshot("systems.bin");
 ```
 
-每个组段包含其作用域内的资源（singleton + named），然后是组内每个声明 `Guid` 的系统。
+每个组段包含其作用域内的资源（singleton + named），以及每个系统一条记录：标识符、追踪 tick，以及对重写了 `Write`/`Read` 的系统而言的序列化状态。
+
+#### 每个系统的追踪 tick
+
+每个重写了 `Update()` 的系统都拥有自己的追踪 tick —— 它上一次运行时的世界 tick。它是该系统内部 `AllAdded<T>` / `AllChanged<T>` / `AllDeleted<T>` 所见变更窗口的下界。该 tick 会为**每个**系统保存，与是否重写 `Write`/`Read` 无关，因此没有序列化状态的系统同样可以恢复它。加载时，恢复的 tick 会被约束到追踪环形缓冲区仍覆盖的范围内（`[CurrentTick - TrackingBufferSize, CurrentTick]`）。
+
+两种加载顺序都能恢复 tick：
+
+```csharp
+// 组已初始化 —— tick 直接应用到正在运行的更新列表
+W.Serializer.LoadWorldSnapshot(snapshot);
+
+// 重建的组 —— Initialize 为每个系统采用已加载的 tick
+GameSys.Create(baseSize: 64);
+GameSys.Add(new SpawnerSystem());
+W.Serializer.LoadWorldSnapshot(snapshot);
+GameSys.Initialize();
+```
+
+快照中不存在的系统 —— 保存之后新增、标识符发生变化，或其所在的组是之后创建的 —— 会获得从快照恢复的世界 tick。因此它在加载后的第一次更新看到的是空的变更窗口，不会报告任何被追踪的变更。
 
 ___
 

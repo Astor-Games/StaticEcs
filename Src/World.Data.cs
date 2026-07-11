@@ -2992,6 +2992,10 @@ namespace FFS.Libraries.StaticEcs {
                 CurrentTick = savedTick;
                 CurrentLastTick = savedLastTick;
 
+                for (var i = 0; i < RegisteredSystems.Count; i++) {
+                    RegisteredSystems[i].ResetLastTicks(CurrentTick);
+                }
+
                 if (chunksCapacity > HeuristicChunks.Length) {
                     ResizeWorld((uint) chunksCapacity);
                 }

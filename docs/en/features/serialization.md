@@ -782,7 +782,7 @@ ___
 
 ## Systems serialization
 
-`ISystem` carries the same four optional methods as `IResource`. Override `Guid()` to opt a system into snapshot serialization.
+`ISystem` carries the same four optional methods as `IResource`. Overriding both `Write` and `Read` opts a system into snapshot serialization of its own state.
 
 ```csharp
 public interface ISystem {
@@ -798,11 +798,12 @@ public interface ISystem {
 }
 ```
 
+Every system has exactly one identifier. `Guid()` returning `null` (the default) means it is derived automatically from the system type name (`assembly-qualified name`); override `Guid()` to pin it explicitly. Snapshot entries — both the system's tracking tick and its serialized state — are matched against registered systems by this identifier.
+
 #### Validation rules (checked at `Add<TSystem>`)
 
-- Systems without `Guid` are silently excluded from snapshots.
-- Any system declaring `Guid` **must** override both `Write` and `Read` — regardless of layout. The unmanaged fast-path does not apply: system instances live boxed inside `SystemData.System`, so framework always invokes the hooks. Missing them throws `StaticEcsException` from `Add`.
-- Duplicate `Guid` within the same `Systems<TSystemsType>` group is asserted in DEBUG.
+- Overriding both `Write` and `Read` enables serialization of the system's own state; overriding neither leaves the system out of it. Overriding only one of the two throws `StaticEcsException` from `Add`.
+- Duplicate identifiers within the same `Systems<TSystemsType>` group are asserted in DEBUG. Registering several instances of the same system type therefore requires overriding `Guid()` with distinct values per instance.
 
 #### Example
 
@@ -851,7 +852,26 @@ W.Serializer.LoadSystemsSnapshot(snapshot);
 W.Serializer.LoadSystemsSnapshot("systems.bin");
 ```
 
-Each pipeline section contains its scoped resources (singleton + named) followed by every system within it that declares a `Guid`.
+Each pipeline section contains its scoped resources (singleton + named) and one entry per system: its identifier, its tracking tick, and — for systems that override `Write`/`Read` — their serialized state.
+
+#### Per-system tracking ticks
+
+Every system that overrides `Update()` owns a tracking tick — the world tick at which it last ran. It is the lower bound of the change window seen by `AllAdded<T>` / `AllChanged<T>` / `AllDeleted<T>` inside that system. The tick is stored for **every** system, independently of whether it overrides `Write`/`Read`, so systems that keep no serialized state restore their tick too. On load a restored tick is clamped into the range still covered by the tracking ring buffer (`[CurrentTick - TrackingBufferSize, CurrentTick]`).
+
+Both load orders restore the ticks:
+
+```csharp
+// Pipeline already initialized — ticks are applied to the running update list
+W.Serializer.LoadWorldSnapshot(snapshot);
+
+// Rebuilt pipeline — Initialize seeds each system from the loaded tick
+GameSys.Create(baseSize: 64);
+GameSys.Add(new SpawnerSystem());
+W.Serializer.LoadWorldSnapshot(snapshot);
+GameSys.Initialize();
+```
+
+A system that is absent from the snapshot — added after the save, its identifier changed, or its whole pipeline created later — receives the world tick restored from the snapshot. Its first update after loading therefore sees an empty change window and reports no tracked changes.
 
 ___
 
