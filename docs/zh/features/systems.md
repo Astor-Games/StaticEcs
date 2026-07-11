@@ -49,7 +49,7 @@ public interface ISystem {
     // 在 Systems.Destroy() 时调用一次
     void Destroy() { }
 
-    // 快照序列化钩子 — 重写 Guid() 以使该系统加入快照
+    // 快照序列化钩子 — 重写 Write() 和 Read() 以保存该系统的状态
     Guid? Guid()                                              => null;
     byte  Version()                                            => 0;
     void  Write(ref BinaryPackWriter writer)                   {}
@@ -280,7 +280,7 @@ ___
 
 ## 快照序列化
 
-`ISystem` 提供四个可选的默认实现方法（`Guid?`、`Version`、`Write`、`Read`）— 与 `IResource` 形式相同。重写 `Guid()` 以使系统实例加入快照序列化：
+`ISystem` 提供四个可选的默认实现方法（`Guid?`、`Version`、`Write`、`Read`）— 与 `IResource` 形式相同。同时重写 `Write` 和 `Read` 以使系统实例自身的状态加入快照序列化：
 
 ```csharp
 public class SpawnerSystem : ISystem {
@@ -296,13 +296,14 @@ public class SpawnerSystem : ISystem {
 }
 ```
 
+每个系统只有一个标识符：`Guid()` 返回 `null`（默认）时由系统类型名派生，重写 `Guid()` 则显式固定它。快照条目通过该标识符与已注册的系统匹配 —— 既包括系统的序列化状态，也包括它的追踪 tick（它上一次运行时的世界 tick，用于界定其内部 `AllAdded<T>` / `AllChanged<T>` / `AllDeleted<T>` 的变更窗口）。无论系统是否有序列化状态，该 tick 都会被保存。
+
 验证在 `Add<TSystem>` 时执行：
 
-- 没有 `Guid` 的系统会被静默排除在快照之外。
-- 任何声明 `Guid` 的系统必须同时重写 `Write` 和 `Read`，与布局无关（系统实例以装箱形式存储在 `SystemData` 中，因此 unmanaged 快速路径不适用）。缺少它们会抛出 `StaticEcsException`。
-- 同一 `Systems<TSystemsType>` 组内的重复 `Guid` 在 DEBUG 模式下断言。
+- 同时重写 `Write` 和 `Read` 会启用系统自身状态的序列化；两者都不重写则该系统不参与这部分快照。只重写其中之一会抛出 `StaticEcsException`。
+- 同一 `Systems<TSystemsType>` 组内的重复标识符在 DEBUG 模式下断言 —— 注册同一系统类型的多个实例时，需为每个实例重写 `Guid()` 并给出不同的值。
 
-每个 `Systems<TSystemsType>.Create` 将其组注册到世界的快照注册表中；组 `Guid` 默认为 `typeof(TSystemsType).GuidFromAQN()`，可通过可选的 `snapshotGuid` 参数覆盖。`WorldSnapshot` 自动为每个组写一个段（其作用域内的资源 + 每个声明 `Guid` 的系统）；加载时未注册的组 `Guid` 段会被静默跳过。
+每个 `Systems<TSystemsType>.Create` 将其组注册到世界的快照注册表中；组 `Guid` 默认为 `typeof(TSystemsType).GuidFromAQN()`，可通过可选的 `snapshotGuid` 参数覆盖。`WorldSnapshot` 自动为每个组写一个段（其作用域内的资源 + 每个系统一条记录）；加载时未注册的组 `Guid` 段会被静默跳过。
 
 独立 API 镜像 `Create/LoadEventsSnapshot`：
 

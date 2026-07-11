@@ -49,7 +49,7 @@ public interface ISystem {
     // Called once during Systems.Destroy()
     void Destroy() { }
 
-    // Snapshot serialization hooks — override Guid() to opt this system into snapshots
+    // Snapshot serialization hooks — override Write() and Read() to store this system's state
     Guid? Guid()                                              => null;
     byte  Version()                                            => 0;
     void  Write(ref BinaryPackWriter writer)                   {}
@@ -280,7 +280,7 @@ ___
 
 ## Snapshot serialization
 
-`ISystem` carries four optional default-implemented methods (`Guid?`, `Version`, `Write`, `Read`) — same shape as `IResource`. Override `Guid()` to opt a system instance into snapshot serialization:
+`ISystem` carries four optional default-implemented methods (`Guid?`, `Version`, `Write`, `Read`) — same shape as `IResource`. Override both `Write` and `Read` to opt a system instance into snapshot serialization of its own state:
 
 ```csharp
 public class SpawnerSystem : ISystem {
@@ -296,13 +296,14 @@ public class SpawnerSystem : ISystem {
 }
 ```
 
+Every system has exactly one identifier: `Guid()` returning `null` (the default) derives it from the system type name, and overriding `Guid()` pins it explicitly. Snapshot entries are matched to registered systems by this identifier — both the system's serialized state and its tracking tick (the world tick at which it last ran, which bounds the change window of `AllAdded<T>` / `AllChanged<T>` / `AllDeleted<T>` inside it). The tick is stored for every system, whether or not it has serialized state.
+
 Validation runs at `Add<TSystem>`:
 
-- Systems without `Guid` are silently excluded from snapshots.
-- Any system declaring `Guid` must override **both** `Write` and `Read` regardless of layout (system instances are stored boxed inside `SystemData`, so the unmanaged fast-path does not apply). Missing them throws `StaticEcsException`.
-- Duplicate `Guid` within the same `Systems<TSystemsType>` group is asserted in DEBUG.
+- Overriding both `Write` and `Read` enables serialization of the system's own state; overriding neither leaves the system out of it. Overriding only one of the two throws `StaticEcsException`.
+- Duplicate identifiers within the same `Systems<TSystemsType>` group are asserted in DEBUG — register several instances of one system type by overriding `Guid()` with distinct values.
 
-Each `Systems<TSystemsType>.Create` registers its pipeline in the world's snapshot registry; the pipeline `Guid` defaults to `typeof(TSystemsType).GuidFromAQN()` and can be overridden via the optional `snapshotGuid` parameter. `WorldSnapshot` automatically writes one section per pipeline (its scoped resources + every system with a `Guid`); on load, sections whose pipeline `Guid` is not currently registered are silently skipped.
+Each `Systems<TSystemsType>.Create` registers its pipeline in the world's snapshot registry; the pipeline `Guid` defaults to `typeof(TSystemsType).GuidFromAQN()` and can be overridden via the optional `snapshotGuid` parameter. `WorldSnapshot` automatically writes one section per pipeline (its scoped resources + an entry per system); on load, sections whose pipeline `Guid` is not currently registered are silently skipped.
 
 Standalone API mirrors `Create/LoadEventsSnapshot`:
 

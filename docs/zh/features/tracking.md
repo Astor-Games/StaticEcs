@@ -532,7 +532,7 @@ entity.Destroy();
 
 ### 反序列化
 
-- **世界快照**（`LoadWorldSnapshot`）：整个追踪状态——包括 `CurrentTick`、`CurrentLastTick`、每个带有追踪标记的组件/标签的所有环形缓冲区槽位，以及世界级的 `TrackCreated` 历史——都会完整恢复。不需要调用 `ClearTracking()`；加载后，`AllAdded<T>`、`AllChanged<T>`、`AllDeleted<T>`、`Created` 以及实体的 `HasXxx(fromTick)` 方法返回的结果与保存前一致。目标世界的 `TrackingBufferSize` 和 `TrackCreated` 必须与保存的世界相同——不匹配会抛出 `StaticEcsException`。
+- **世界快照**（`LoadWorldSnapshot`）：整个追踪状态——包括 `CurrentTick`、`CurrentLastTick`、每个系统作为其变更窗口下界的专属 tick、每个带有追踪标记的组件/标签的所有环形缓冲区槽位，以及世界级的 `TrackCreated` 历史——都会完整恢复。不需要调用 `ClearTracking()`；加载后，`AllAdded<T>`、`AllChanged<T>`、`AllDeleted<T>`、`Created` 以及实体的 `HasXxx(fromTick)` 方法返回的结果与保存前一致。目标世界的 `TrackingBufferSize` 和 `TrackCreated` 必须与保存的世界相同——不匹配会抛出 `StaticEcsException`。
 - **集群/块快照**（`LoadClusterSnapshot` / `LoadChunkSnapshot`）：这些部分快照中**不**保存追踪数据。加载它们不会影响目标世界的 tick 和追踪历史。应用的实体/组件变更**不**会在目标世界产生 `Added` / `Changed` / `Deleted` 位——它们是直接的掩码写入。如果需要让新加载的块从此参与追踪，请调用 `ClearTracking()`（或按组件/按实体的变体）建立一个干净的基线，然后照常继续。
 
 ```csharp
