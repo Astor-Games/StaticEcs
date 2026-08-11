@@ -794,8 +794,8 @@ namespace FFS.Libraries.StaticEcs {
             return $"{typeName}<{genericArgs}>".Replace("+", ".");
         }
 
-        internal static Guid GuidFromAQN(this Type type) {
-            var simplifiedAQN = $"{type.FullName}, {type.Assembly.GetName().Name}".ToLowerInvariant();
+        internal static Guid GuidFromAQN(this Type type, string prefix = null) {
+            var simplifiedAQN = $"{prefix ?? string.Empty}{type.FullName}, {type.Assembly.GetName().Name}".ToLowerInvariant();
 
             using var md5 = MD5.Create();
             var hashBytes = md5.ComputeHash(Encoding.UTF8.GetBytes(simplifiedAQN));
