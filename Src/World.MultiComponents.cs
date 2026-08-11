@@ -101,7 +101,7 @@ namespace FFS.Libraries.StaticEcs {
                     config = cfg.Config<TWorld>();
                     elementStrategy = cfg.ElementPackStrategy() ?? AutoRegistration.TryCreateUnmanagedPackArrayStrategy<TValue>() ?? new StructPackArrayStrategy<TValue>();
                 }
-                RegisterMultiComponentType(config, elementStrategy, $"Multi<{typeof(TValue).Name}>");
+                RegisterMultiComponentType(config, elementStrategy);
             }
 
             internal uint Offset;

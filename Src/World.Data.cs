@@ -167,6 +167,20 @@ namespace FFS.Libraries.StaticEcs {
             Data.Instance.RegisterComponentOrTagTypeInternal(config, false, nonSerializable ?? typeof(INonSerializable).IsAssignableFrom(typeof(T)), typeName);
         }
 
+		[MethodImpl(AggressiveInlining)]
+		internal static void RegisterLinkComponentType<T>(ComponentTypeConfig<Link<T>> config)
+			where T : unmanaged, ILinkType {
+			config = config.MergeWith(new ComponentTypeConfig<Link<T>>(guid: typeof(T).GuidFromAQN("Link<>")));
+			RegisterComponentType(config, $"Link<{typeof(T).Name}>", typeof(INonSerializable).IsAssignableFrom(typeof(T)));
+		}
+
+		[MethodImpl(AggressiveInlining)]
+		internal static void RegisterLinksComponentType<T>(ComponentTypeConfig<Links<T>> config)
+			where T : unmanaged, ILinksType {
+			config = config.MergeWith(new ComponentTypeConfig<Links<T>>(guid: typeof(T).GuidFromAQN("Links<>")));
+			RegisterComponentType(config, $"Links<{typeof(T).Name}>", typeof(INonSerializable).IsAssignableFrom(typeof(T)));
+		}
+
         /// <summary>
         /// Registers a multi-component type with an optional element serialization strategy.
         /// Sets <see cref="Multi{TValue}.ElementStrategy"/> before component registration.
@@ -175,10 +189,11 @@ namespace FFS.Libraries.StaticEcs {
         /// <param name="config">Component configuration for <see cref="Multi{T}"/>.</param>
         /// <param name="elementStrategy">Serialization strategy for elements. Null uses default <c>StructPackArrayStrategy</c>.</param>
         [MethodImpl(AggressiveInlining)]
-        internal static void RegisterMultiComponentType<T>(ComponentTypeConfig<Multi<T>> config, IPackArrayStrategy<T> elementStrategy, string typeName)
+        internal static void RegisterMultiComponentType<T>(ComponentTypeConfig<Multi<T>> config, IPackArrayStrategy<T> elementStrategy)
             where T : struct, IMultiComponent {
             Multi<T>.ElementStrategy = elementStrategy ?? AutoRegistration.TryCreateUnmanagedPackArrayStrategy<T>() ?? new StructPackArrayStrategy<T>();
-            RegisterComponentType(config, typeName, typeof(INonSerializable).IsAssignableFrom(typeof(T)));
+			config = config.MergeWith(new ComponentTypeConfig<Multi<T>>(guid: typeof(T).GuidFromAQN("Multi<>")));
+            RegisterComponentType(config, $"Multi<{typeof(T).Name}>", typeof(INonSerializable).IsAssignableFrom(typeof(T)));
         }
 
         [MethodImpl(AggressiveInlining)]

@@ -1542,7 +1542,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (default(T) is ILinkConfig<T> cfg) {
                     config = cfg.Config<TWorld>();
                 }
-                RegisterComponentType(config, $"Link<{typeof(T).Name}>", typeof(INonSerializable).IsAssignableFrom(typeof(T)));
+                RegisterLinkComponentType(config);
                 return this;
             }
 
@@ -1558,7 +1558,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (default(T) is ILinksConfig<T> cfg) {
                     config = cfg.Config<TWorld>();
                 }
-                RegisterComponentType(config, $"Links<{typeof(T).Name}>", typeof(INonSerializable).IsAssignableFrom(typeof(T)));
+                RegisterLinksComponentType(config);
                 return this;
             }
 
@@ -1576,7 +1576,7 @@ namespace FFS.Libraries.StaticEcs {
                     config = cfg.Config<TWorld>();
                     elementStrategy = cfg.ElementPackStrategy();
                 }
-                RegisterMultiComponentType(config, elementStrategy, $"Multi<{typeof(T).Name}>");
+                RegisterMultiComponentType(config, elementStrategy);
                 return this;
             }
         }
